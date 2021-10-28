@@ -24,7 +24,7 @@ unsafe impl Sync for UnsafeMatSyncWrapper {}
 
 #[derive(Error, Debug)]
 pub enum StackerError {
-    #[error("Could not lock mutex")]
+    #[error("Something wrong with Arc/Mutex handling")]
     MutexError,
     #[error("Not enough files")]
     NotEnoughFiles,
@@ -36,9 +36,9 @@ pub enum StackerError {
     PoisonError(#[from] std::sync::PoisonError<MatExprResult<MatExpr>>),
 }
 
-/// Stacks, using keypoint matching, all .jpg files under `path` and returns the result as a `f32` `Mat`
-pub fn keypoint_match(path: PathBuf) -> Result<Mat, StackerError> {
-    let files: Vec<_> = std::fs::read_dir(path)?
+/// Returns all .jpg files in a path
+fn collect_files(path: &Path) -> Result<Vec<PathBuf>, StackerError> {
+    Ok(std::fs::read_dir(path)?
         .into_iter()
         .filter_map(|f| f.ok())
         .filter(|f| f.path().is_file())
@@ -52,15 +52,18 @@ pub fn keypoint_match(path: PathBuf) -> Result<Mat, StackerError> {
             }
             _ => None,
         })
-        .collect();
+        .collect())
+}
 
+/// Stacks, using keypoint matching, all .jpg files under `path` and returns the result as a `f32` `Mat`
+pub fn keypoint_match(path: PathBuf) -> Result<Mat, StackerError> {
     let mut orb = <dyn ORB>::default()?;
     let mut first_kp: Option<Vector<KeyPoint>> = None;
     let mut first_des = Mat::default();
     let mut number_of_files: f64 = 0.0;
     let mut stacked_img = Mat::default();
 
-    for file in files {
+    for file in collect_files(&path)? {
         number_of_files += 1.0;
 
         let (img, img_f) = {
@@ -161,21 +164,7 @@ pub fn ecc_match(path: PathBuf) -> Result<Mat, StackerError> {
         1e-5,
     )?;
 
-    let files: Vec<_> = std::fs::read_dir(path)?
-        .into_iter()
-        .filter_map(|f| f.ok())
-        .filter(|f| f.path().is_file())
-        .filter_map(|f| match f.path().extension() {
-            Some(x) => {
-                if x.to_str().is_some() && x.to_str().unwrap().to_uppercase().starts_with("JPG") {
-                    Some(f.path())
-                } else {
-                    None
-                }
-            }
-            _ => None,
-        })
-        .collect();
+    let files = collect_files(&path)?;
     #[allow(clippy::unnecessary_lazy_evaluations)]
     let (first_file, rest_of_the_files) = files
         .split_first()

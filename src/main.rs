@@ -1,4 +1,4 @@
-use libstacker::{keypoint_match, StackerError, ecc_match};
+use libstacker::{ecc_match, keypoint_match, StackerError};
 use opencv::highgui::{imshow, wait_key};
 use std::path::PathBuf;
 

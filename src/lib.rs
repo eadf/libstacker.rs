@@ -1,8 +1,9 @@
+use opencv::core::{MatExpr, MatExprResult};
 use opencv::hub_prelude::*;
 use opencv::prelude::*;
 use opencv::{
     calib3d,
-    core::{self, KeyPoint, Scalar, TermCriteria_Type, Vector},
+    core::{self, KeyPoint, Mat, Scalar, TermCriteria_Type, Vector},
     features2d::{BFMatcher, ORB},
     imgcodecs,
     imgcodecs::imread,
@@ -11,17 +12,28 @@ use opencv::{
     Result,
 };
 use ordered_float::OrderedFloat;
-use std::path::PathBuf;
+use rayon::prelude::*;
+use std::path::{Path, PathBuf};
+use std::sync::{Arc, Mutex};
 use thiserror::Error;
+
+/// A total hack allowing opencv::Mat objects to be Sync.
+/// Only use this on immutable Mat objects.
+struct UnsafeMatSyncWrapper(Mat);
+unsafe impl Sync for UnsafeMatSyncWrapper {}
 
 #[derive(Error, Debug)]
 pub enum StackerError {
+    #[error("Could not lock mutex")]
+    MutexError,
     #[error("Not enough files")]
     NotEnoughFiles,
     #[error(transparent)]
     CvError(#[from] opencv::Error),
     #[error(transparent)]
     IoError(#[from] std::io::Error),
+    #[error(transparent)]
+    PoisonError(#[from] std::sync::PoisonError<MatExprResult<MatExpr>>),
 }
 
 /// Stacks, using keypoint matching, all .jpg files under `path` and returns the result as a `f32` `Mat`
@@ -126,7 +138,7 @@ pub fn keypoint_match(path: PathBuf) -> Result<Mat, StackerError> {
 }
 
 /// Read a image file and return COLOR_BGR2GRAY and CV_32F versions of it
-fn read_grey_f32(filename:&PathBuf) -> Result<(Mat,Mat), StackerError> {
+fn read_grey_f32(filename: &Path) -> Result<(Mat, Mat), StackerError> {
     let img = imread(filename.to_str().unwrap(), imgcodecs::IMREAD_COLOR)?;
     let mut img_f32 = Mat::default();
     img.convert_to(&mut img_f32, opencv::core::CV_32F, 1.0, 0.0)?;
@@ -164,42 +176,63 @@ pub fn ecc_match(path: PathBuf) -> Result<Mat, StackerError> {
             _ => None,
         })
         .collect();
-    let (first_file, rest_of_the_files) = files.split_first().ok_or_else(||StackerError::NotEnoughFiles)?;
-    let (first_img, mut stacked_img) = read_grey_f32(&first_file)?;
-    let mut number_of_files: f64 = 1.0;
+    #[allow(clippy::unnecessary_lazy_evaluations)]
+    let (first_file, rest_of_the_files) = files
+        .split_first()
+        .ok_or_else(|| StackerError::NotEnoughFiles)?;
+    let (first_img, stacked_img) = read_grey_f32(first_file)?;
+    let first_img = UnsafeMatSyncWrapper(first_img);
+    let stacked_img: Arc<Mutex<Mat>> = Arc::new(Mutex::new(stacked_img));
 
-    for file in rest_of_the_files {
-        number_of_files += 1.0;
-        let (img_grey, img_f32) = read_grey_f32(file)?;
+    let number_of_files = rest_of_the_files
+        .into_par_iter()
+        .map(|file| -> Result<(), StackerError> {
+            let (img_grey, img_f32) = read_grey_f32(file)?;
 
-        // s, M = cv2.findTransformECC(cv2.cvtColor(image,cv2.COLOR_BGR2GRAY), first_image, M, cv2.MOTION_HOMOGRAPHY)
-        let mut warp_matrix = Mat::default();
+            // s, M = cv2.findTransformECC(cv2.cvtColor(image,cv2.COLOR_BGR2GRAY), first_image, M, cv2.MOTION_HOMOGRAPHY)
+            let mut warp_matrix = Mat::default();
 
-        let _ = opencv::video::find_transform_ecc(
-            &img_grey,
-            &first_img,
-            &mut warp_matrix,
-            opencv::video::MOTION_HOMOGRAPHY,
-            criteria,
-            &Mat::default(),
-            // TODO: I have no idea what parameter to use
-            1,
-        )?;
-        // image = cv2.warpPerspective(image, M, (h, w))
-        let mut warped_image = Mat::default();
-        imgproc::warp_perspective(
-            &img_f32,
-            &mut warped_image,
-            &warp_matrix,
-            img_f32.size()?,
-            opencv::video::MOTION_HOMOGRAPHY,
-            core::BORDER_CONSTANT,
-            Scalar::default(),
-        )?;
-        stacked_img = (stacked_img + warped_image).into_result()?.to_mat()?;
+            let _ = opencv::video::find_transform_ecc(
+                &img_grey,
+                &first_img.0,
+                &mut warp_matrix,
+                opencv::video::MOTION_HOMOGRAPHY,
+                criteria,
+                &Mat::default(),
+                // TODO: I have no idea what parameter to use
+                1,
+            )?;
+
+            // image = cv2.warpPerspective(image, M, (h, w))
+            let mut warped_image = Mat::default();
+            imgproc::warp_perspective(
+                &img_f32,
+                &mut warped_image,
+                &warp_matrix,
+                img_f32.size()?,
+                opencv::video::MOTION_HOMOGRAPHY,
+                core::BORDER_CONSTANT,
+                Scalar::default(),
+            )?;
+            if let Ok(mut stacked_img) = stacked_img.lock() {
+                let taken_stacked_img = std::mem::take(&mut *stacked_img);
+                *stacked_img = (taken_stacked_img + &warped_image)
+                    .into_result()?
+                    .to_mat()?;
+                Ok(())
+            } else {
+                Err(StackerError::MutexError)
+            }
+        })
+        .count()
+        + 1;
+    if let Ok(stacked_img) = Arc::try_unwrap(stacked_img) {
+        if let Ok(mut stacked_img) = stacked_img.into_inner() {
+            stacked_img = (stacked_img / number_of_files as f64)
+                .into_result()?
+                .to_mat()?;
+            return Ok(stacked_img);
+        }
     }
-    stacked_img = (stacked_img / number_of_files).into_result()?.to_mat()?;
-
-    Ok(stacked_img)
+    Err(StackerError::MutexError)
 }
-

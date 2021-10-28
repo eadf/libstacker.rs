@@ -15,6 +15,8 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
+    - name: Download deps
+      run: sudo apt update && sudo apt install -y clang libclang-dev libopencv-dev
     - uses: actions/checkout@v2
     - name: Build
       run: cargo build --verbose

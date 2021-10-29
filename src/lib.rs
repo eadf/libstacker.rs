@@ -1,13 +1,12 @@
-use opencv::core::{MatExpr, MatExprResult};
-use opencv::hub_prelude::*;
-use opencv::prelude::*;
+use opencv::core::TermCriteria;
 use opencv::{
     calib3d,
-    core::{self, KeyPoint, Mat, Scalar, TermCriteria_Type, Vector},
+    core::{self, KeyPoint, Mat, MatExpr, MatExprResult, Scalar, TermCriteria_Type, Vector},
     features2d::{BFMatcher, ORB},
-    imgcodecs,
-    imgcodecs::imread,
+    hub_prelude::*,
+    imgcodecs::{self, imread},
     imgproc,
+    prelude::*,
     types::VectorOfPoint2f,
     Result,
 };
@@ -17,15 +16,15 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use thiserror::Error;
 
-/// A total hack allowing opencv::Mat objects to be Sync.
+/// A total hack allowing `opencv::Mat` objects to be `Sync`.
 /// Only use this on immutable Mat objects.
 struct UnsafeMatSyncWrapper(Mat);
 unsafe impl Sync for UnsafeMatSyncWrapper {}
 
-/// A total hack allowing opencv::Vector<KeyPoints> objects to be Sync.
+/// A total hack allowing `opencv::Vector<KeyPoints>` objects to be `Sync`.
 /// Only use this on immutable Vector objects.
-struct UnsafeVecSyncWrapper(Vector<KeyPoint>);
-unsafe impl Sync for UnsafeVecSyncWrapper {}
+struct UnsafeVectorKeyPointSyncWrapper(Vector<KeyPoint>);
+unsafe impl Sync for UnsafeVectorKeyPointSyncWrapper {}
 
 #[derive(Error, Debug)]
 pub enum StackerError {
@@ -41,7 +40,7 @@ pub enum StackerError {
     PoisonError(#[from] std::sync::PoisonError<MatExprResult<MatExpr>>),
 }
 
-/// Returns all (.jpg,jpeg,tif,png) files in a path
+/// Returns all (.jpg,jpeg,tif,png) files in a directory
 pub fn collect_image_files(path: &Path) -> Result<Vec<PathBuf>, StackerError> {
     Ok(std::fs::read_dir(path)?
         .into_iter()
@@ -69,7 +68,7 @@ pub fn collect_image_files(path: &Path) -> Result<Vec<PathBuf>, StackerError> {
         .collect())
 }
 
-/// opens an image file, returns a Mat<f32>, keypoints and descriptors of the file
+/// Opens an image file. Returns a (Mat<f32>, keypoints and descriptors) tuple of the file
 fn orb_image(file: &Path) -> Result<(Mat, Vector<KeyPoint>, Mat), StackerError> {
     let mut orb = <dyn ORB>::default()?;
     let img = imread(file.to_str().unwrap(), imgcodecs::IMREAD_COLOR)?;
@@ -83,17 +82,29 @@ fn orb_image(file: &Path) -> Result<(Mat, Vector<KeyPoint>, Mat), StackerError> 
     Ok((img_f, kp, des))
 }
 
+#[derive(Debug)]
+/// Structure containing the opencv parameters needed to calculate `keypoint_match()`
+pub struct KeyPointMatchParameters {
+    /// parameter used in `opencv::imgproc::warp_perspective()`
+    pub method: i32,
+    /// parameter used in `opencv::imgproc::warp_perspective()`
+    pub ransac_reproj_threshold: f64,
+}
+
 /// Stacks, using keypoint matching, all the `files` and returns the result as a `Mat<f32>`
 /// The first file will be used as the template that the other files are matched against.
 /// This should be the image with best focus.
-pub fn keypoint_match(files: Vec<PathBuf>) -> Result<Mat, StackerError> {
+pub fn keypoint_match(
+    files: Vec<PathBuf>,
+    params: KeyPointMatchParameters,
+) -> Result<Mat, StackerError> {
     #[allow(clippy::unnecessary_lazy_evaluations)]
     let (first_file, rest_of_the_files) = files
         .split_first()
         .ok_or_else(|| StackerError::NotEnoughFiles)?;
 
     let (stacked_img, first_kp, first_des) = orb_image(first_file)?;
-    let first_kp = UnsafeVecSyncWrapper(first_kp);
+    let first_kp = UnsafeVectorKeyPointSyncWrapper(first_kp);
     let first_des = UnsafeMatSyncWrapper(first_des);
     let stacked_img: Arc<Mutex<Mat>> = Arc::new(Mutex::new(stacked_img));
 
@@ -136,8 +147,8 @@ pub fn keypoint_match(files: Vec<PathBuf>) -> Result<Mat, StackerError> {
                 &dst_pts,
                 &src_pts,
                 &mut Mat::default(),
-                calib3d::RANSAC,
-                5.0,
+                params.method,
+                params.ransac_reproj_threshold,
             )?;
 
             let mut warped_image = Mat::default();
@@ -152,7 +163,7 @@ pub fn keypoint_match(files: Vec<PathBuf>) -> Result<Mat, StackerError> {
             )?;
 
             if let Ok(mut stacked_img) = stacked_img.lock() {
-                // For some reason a mutex guard that won't allow (*a + &b)
+                // For some reason a mutex guard won't allow (*a + &b)
                 let taken_stacked_img = std::mem::take(&mut *stacked_img);
                 *stacked_img = (taken_stacked_img + &warped_image)
                     .into_result()?
@@ -176,7 +187,7 @@ pub fn keypoint_match(files: Vec<PathBuf>) -> Result<Mat, StackerError> {
     Err(StackerError::MutexError)
 }
 
-/// Read a image file and return Mat<COLOR_BGR2GRAY> and Mat<CV_32F> versions of it
+/// Read a image file and returns a (Mat<COLOR_BGR2GRAY>,Mat<CV_32F>) tuple
 fn read_grey_f32(filename: &Path) -> Result<(Mat, Mat), StackerError> {
     let img = imread(filename.to_str().unwrap(), imgcodecs::IMREAD_COLOR)?;
     let mut img_f32 = Mat::default();
@@ -188,19 +199,40 @@ fn read_grey_f32(filename: &Path) -> Result<(Mat, Mat), StackerError> {
     Ok((img_grey, img_f32))
 }
 
+#[derive(Debug)]
+/// Structure containing the opencv parameters needed to calculate `ecc_match()`
+pub struct EccMatchParameters {
+    /// `opencv::core::TermCriteria::max_count`
+    pub max_count: Option<i32>,
+    /// `opencv::core::TermCriteria::epsilon`
+    pub epsilon: Option<f64>,
+    /// parameter used in `opencv::video::find_transform_ecc()`
+    pub gauss_filt_size: i32,
+}
+
+impl From<&EccMatchParameters> for Result<TermCriteria, StackerError> {
+    fn from(r: &EccMatchParameters) -> Result<TermCriteria, StackerError> {
+        let mut rv = TermCriteria::default()?;
+        if let Some(max_count) = r.max_count {
+            rv.typ |= TermCriteria_Type::COUNT as i32;
+            rv.max_count = max_count;
+        }
+        if let Some(epsilon) = r.epsilon {
+            rv.typ |= TermCriteria_Type::EPS as i32;
+            rv.epsilon = epsilon;
+        }
+        Ok(rv)
+    }
+}
+
 /// Stacks, using ECC method, all `files` and returns the result as a Mat<f32>`
 /// The first file will be used as the template that the other files are matched against.
 /// This should be the image with best focus.
-pub fn ecc_match(files: Vec<PathBuf>) -> Result<Mat, StackerError> {
-    let criteria = opencv::core::TermCriteria::new(
-        TermCriteria_Type::COUNT as i32 | TermCriteria_Type::EPS as i32,
-        //Specify the number of iterations. TODO: I have no idea what parameter to use
-        5000,
-        // Specify the threshold of the increment
-        // in the correlation coefficient between two iterations
-        // TODO: I have no idea what parameter to use
-        1e-5,
-    )?;
+pub fn ecc_match(
+    files: Vec<PathBuf>,
+    params: EccMatchParameters,
+) -> Result<Mat, StackerError> {
+    let criteria = Result::<TermCriteria, StackerError>::from(&params)?;
 
     #[allow(clippy::unnecessary_lazy_evaluations)]
     let (first_file, rest_of_the_files) = files
@@ -226,7 +258,7 @@ pub fn ecc_match(files: Vec<PathBuf>) -> Result<Mat, StackerError> {
                 criteria,
                 &Mat::default(),
                 // TODO: I have no idea what parameter to use
-                1,
+                params.gauss_filt_size,
             )?;
 
             // image = cv2.warpPerspective(image, M, (h, w))
@@ -241,7 +273,7 @@ pub fn ecc_match(files: Vec<PathBuf>) -> Result<Mat, StackerError> {
                 Scalar::default(),
             )?;
             if let Ok(mut stacked_img) = stacked_img.lock() {
-                // For some reason a mutex guard that won't allow (*a + &b)
+                // For some reason a mutex guard won't allow (*a + &b)
                 let taken_stacked_img = std::mem::take(&mut *stacked_img);
                 *stacked_img = (taken_stacked_img + &warped_image)
                     .into_result()?

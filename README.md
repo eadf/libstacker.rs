@@ -13,9 +13,9 @@ opencv-rust can be little tricky to install. Follow instructions from here: [rus
 
 ### Run the example:
 
-```cargo run --release```
+```cargo run --example main --release```
 
-and then wait a minute..
+and then wait a few seconds..
 
 
 ## Todo

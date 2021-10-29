@@ -204,6 +204,7 @@ pub fn ecc_match(path: PathBuf) -> Result<Mat, StackerError> {
                 Scalar::default(),
             )?;
             if let Ok(mut stacked_img) = stacked_img.lock() {
+                // For some reason a mutex guard that won't allow (*a + &b)
                 let taken_stacked_img = std::mem::take(&mut *stacked_img);
                 *stacked_img = (taken_stacked_img + &warped_image)
                     .into_result()?

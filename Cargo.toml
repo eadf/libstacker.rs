@@ -9,7 +9,7 @@ keywords = ["opencv", "image_stacking"]
 
 [[example]]
 name = "main"
-path = "src/main.rs"
+path = "examples/main.rs"
 
 [dependencies]
 opencv = "0.57"

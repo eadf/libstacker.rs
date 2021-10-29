@@ -36,16 +36,25 @@ pub enum StackerError {
     PoisonError(#[from] std::sync::PoisonError<MatExprResult<MatExpr>>),
 }
 
-/// Returns all .jpg files in a path
-fn collect_files(path: &Path) -> Result<Vec<PathBuf>, StackerError> {
+/// Returns all (.jpg,jpeg,tif,png) files in a path
+pub fn collect_image_files(path: &Path) -> Result<Vec<PathBuf>, StackerError> {
     Ok(std::fs::read_dir(path)?
         .into_iter()
         .filter_map(|f| f.ok())
         .filter(|f| f.path().is_file())
         .filter_map(|f| match f.path().extension() {
-            Some(x) => {
-                if x.to_str().is_some() && x.to_str().unwrap().to_uppercase().starts_with("JPG") {
-                    Some(f.path())
+            Some(extension) => {
+                if let Some(extension) = extension.to_str() {
+                    let extension = extension.to_uppercase();
+                    if extension.starts_with("JPG")
+                        || extension.starts_with("JPEG")
+                        || extension.starts_with("TIF")
+                        || extension.starts_with("PNG")
+                    {
+                        Some(f.path())
+                    } else {
+                        None
+                    }
                 } else {
                     None
                 }
@@ -55,15 +64,15 @@ fn collect_files(path: &Path) -> Result<Vec<PathBuf>, StackerError> {
         .collect())
 }
 
-/// Stacks, using keypoint matching, all .jpg files under `path` and returns the result as a `f32` `Mat`
-pub fn keypoint_match(path: PathBuf) -> Result<Mat, StackerError> {
+/// Stacks, using keypoint matching, all the `files` and returns the result as a `Mat<f32>`
+pub fn keypoint_match(files: Vec<PathBuf>) -> Result<Mat, StackerError> {
     let mut orb = <dyn ORB>::default()?;
     let mut first_kp: Option<Vector<KeyPoint>> = None;
     let mut first_des = Mat::default();
     let mut number_of_files: f64 = 0.0;
     let mut stacked_img = Mat::default();
 
-    for file in collect_files(&path)? {
+    for file in files.iter() {
         number_of_files += 1.0;
 
         let (img, img_f) = {
@@ -152,8 +161,8 @@ fn read_grey_f32(filename: &Path) -> Result<(Mat, Mat), StackerError> {
     Ok((img_grey, img_f32))
 }
 
-/// Stacks, using ECC method, all .jpg files under `path` and returns the result as a `f32` `Mat`
-pub fn ecc_match(path: PathBuf) -> Result<Mat, StackerError> {
+/// Stacks, using ECC method, all `files` and returns the result as a Mat<f32>`
+pub fn ecc_match(files: Vec<PathBuf>) -> Result<Mat, StackerError> {
     let criteria = opencv::core::TermCriteria::new(
         TermCriteria_Type::COUNT as i32 | TermCriteria_Type::EPS as i32,
         //Specify the number of iterations. TODO: I have no idea what parameter to use
@@ -164,7 +173,6 @@ pub fn ecc_match(path: PathBuf) -> Result<Mat, StackerError> {
         1e-5,
     )?;
 
-    let files = collect_files(&path)?;
     #[allow(clippy::unnecessary_lazy_evaluations)]
     let (first_file, rest_of_the_files) = files
         .split_first()

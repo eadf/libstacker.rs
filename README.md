@@ -22,6 +22,4 @@ and then wait a few seconds..
 
 * Figure out what to do with .reshape() in keypoint_match()
 * Figure out some opencv parameters
-* Rayon keypoint_match() as well.
 * Command line options in the example
-

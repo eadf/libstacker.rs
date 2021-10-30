@@ -1,9 +1,15 @@
+//! This library contains image stacking functions, based on OpenCV <https://crates.io/crates/opencv>
+//!
+//! The library is a multi-threaded port of code written by Mathias Sundholm Copyright (c) 2021 <https://github.com/maitek/image_stacking>
+//!
+//! Copyright (c) 2021 Eadf <lacklustr@protonmail.com>
+//! License: MIT/Apache 2.0
+
 use opencv::core::TermCriteria;
 use opencv::{
     calib3d,
     core::{self, KeyPoint, Mat, MatExpr, MatExprResult, Scalar, TermCriteria_Type, Vector},
     features2d::{BFMatcher, ORB},
-    hub_prelude::*,
     imgcodecs::{self, imread},
     imgproc,
     prelude::*,
@@ -16,13 +22,13 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use thiserror::Error;
 
-/// A total hack allowing `opencv::Mat` objects to be `Sync`.
-/// Only use this on immutable Mat objects.
+/// A q&d hack allowing `opencv::Mat` objects to be `Sync`.
+/// Only use this on immutable `Mat` objects.
 struct UnsafeMatSyncWrapper(Mat);
 unsafe impl Sync for UnsafeMatSyncWrapper {}
 
-/// A total hack allowing `opencv::Vector<KeyPoints>` objects to be `Sync`.
-/// Only use this on immutable Vector objects.
+/// A q&d hack allowing `opencv::Vector<KeyPoints>` objects to be `Sync`.
+/// Only use this on immutable `Vector<KeyPoints>` objects.
 struct UnsafeVectorKeyPointSyncWrapper(Vector<KeyPoint>);
 unsafe impl Sync for UnsafeVectorKeyPointSyncWrapper {}
 
@@ -68,42 +74,56 @@ pub fn collect_image_files(path: &Path) -> Result<Vec<PathBuf>, StackerError> {
         .collect())
 }
 
-/// Opens an image file. Returns a (Mat<f32>, keypoints and descriptors) tuple of the file
-fn orb_image(file: &Path) -> Result<(Mat, Vector<KeyPoint>, Mat), StackerError> {
+/// Opens an image file. Returns a (`Mat<f32>`, keypoints and descriptors) tuple of the file
+fn orb_detect_and_compute(file: &Path) -> Result<(Mat, Vector<KeyPoint>, Mat), StackerError> {
     let mut orb = <dyn ORB>::default()?;
     let img = imread(file.to_str().unwrap(), imgcodecs::IMREAD_COLOR)?;
-    let mut img_f = Mat::default();
-    img.convert_to(&mut img_f, opencv::core::CV_32F, 1.0, 0.0)?;
-    img_f = (img_f / 255.0).into_result()?.to_mat()?;
+    let mut img_f32 = Mat::default();
+    img.convert_to(&mut img_f32, opencv::core::CV_32F, 1.0, 0.0)?;
+    img_f32 = (img_f32 / 255.0).into_result()?.to_mat()?;
 
     let mut kp = Vector::<KeyPoint>::new();
     let mut des = Mat::default();
     orb.detect_and_compute(&img, &Mat::default(), &mut kp, &mut des, false)?;
-    Ok((img_f, kp, des))
+    Ok((img_f32, kp, des))
 }
 
 #[derive(Debug)]
 /// Structure containing the opencv parameters needed to calculate `keypoint_match()`
 pub struct KeyPointMatchParameters {
-    /// parameter used in `opencv::imgproc::warp_perspective()`
+    /// parameter used in `opencv::calib3d::find_homography()`
+    /// Should probably always be `opencv::calib3d::RANSAC`
+    // TODO: maybe remove?
     pub method: i32,
-    /// parameter used in `opencv::imgproc::warp_perspective()`
+    /// parameter used in `opencv::calib3d::find_homography()`
     pub ransac_reproj_threshold: f64,
 }
 
-/// Stacks, using keypoint matching, all the `files` and returns the result as a `Mat<f32>`
-/// The first file will be used as the template that the other files are matched against.
+/// Stacks images using OpenCV keypoint match method.
+/// All `files` will be stacked and returned as a `Mat<f32>`.
+/// The first file will be used as the template the other files are matched against.
 /// This should be the image with best focus.
+/// ```no_run
+/// use libstacker::{keypoint_match, collect_image_files, KeyPointMatchParameters, StackerError};
+/// use std::path::PathBuf;
+/// use opencv::prelude::*;
+/// # fn f() -> Result<(),StackerError> {
+/// let keypoint_match_img = keypoint_match(
+///     collect_image_files(&PathBuf::from("image_stacking_py/images"))?,
+///     KeyPointMatchParameters {
+///         method: opencv::calib3d::RANSAC,
+///         ransac_reproj_threshold: 5.0,
+///      })?;
+/// # Ok(())}
+/// ```
 pub fn keypoint_match(
     files: Vec<PathBuf>,
     params: KeyPointMatchParameters,
 ) -> Result<Mat, StackerError> {
-    #[allow(clippy::unnecessary_lazy_evaluations)]
-    let (first_file, rest_of_the_files) = files
-        .split_first()
-        .ok_or_else(|| StackerError::NotEnoughFiles)?;
+    let (first_file, rest_of_the_files) =
+        files.split_first().ok_or(StackerError::NotEnoughFiles)?;
 
-    let (stacked_img, first_kp, first_des) = orb_image(first_file)?;
+    let (stacked_img, first_kp, first_des) = orb_detect_and_compute(first_file)?;
     let first_kp = UnsafeVectorKeyPointSyncWrapper(first_kp);
     let first_des = UnsafeMatSyncWrapper(first_des);
     let stacked_img: Arc<Mutex<Mat>> = Arc::new(Mutex::new(stacked_img));
@@ -111,7 +131,7 @@ pub fn keypoint_match(
     let number_of_files = rest_of_the_files
         .into_par_iter()
         .map(|file| -> Result<(), StackerError> {
-            let (img_f, kp, des) = orb_image(file)?;
+            let (img_f, kp, des) = orb_detect_and_compute(file)?;
 
             let matches = {
                 let mut matcher = BFMatcher::new(core::NORM_HAMMING, true)?;
@@ -187,7 +207,7 @@ pub fn keypoint_match(
     Err(StackerError::MutexError)
 }
 
-/// Read a image file and returns a (Mat<COLOR_BGR2GRAY>,Mat<CV_32F>) tuple
+/// Read a image file and returns a (`Mat<COLOR_BGR2GRAY>`,`Mat<CV_32F>`) tuple
 fn read_grey_f32(filename: &Path) -> Result<(Mat, Mat), StackerError> {
     let img = imread(filename.to_str().unwrap(), imgcodecs::IMREAD_COLOR)?;
     let mut img_f32 = Mat::default();
@@ -202,9 +222,9 @@ fn read_grey_f32(filename: &Path) -> Result<(Mat, Mat), StackerError> {
 #[derive(Debug)]
 /// Structure containing the opencv parameters needed to calculate `ecc_match()`
 pub struct EccMatchParameters {
-    /// `opencv::core::TermCriteria::max_count`
+    /// parameter used as `opencv::core::TermCriteria::max_count`
     pub max_count: Option<i32>,
-    /// `opencv::core::TermCriteria::epsilon`
+    /// parameter used as `opencv::core::TermCriteria::epsilon`
     pub epsilon: Option<f64>,
     /// parameter used in `opencv::video::find_transform_ecc()`
     pub gauss_filt_size: i32,
@@ -225,19 +245,29 @@ impl From<&EccMatchParameters> for Result<TermCriteria, StackerError> {
     }
 }
 
-/// Stacks, using ECC method, all `files` and returns the result as a Mat<f32>`
-/// The first file will be used as the template that the other files are matched against.
+/// Stacks images using OpenCV ECC method.
+/// All `files` will be stacked and returned as a `Mat<f32>`.
+/// The first file will be used as the template the other files are matched against.
 /// This should be the image with best focus.
-pub fn ecc_match(
-    files: Vec<PathBuf>,
-    params: EccMatchParameters,
-) -> Result<Mat, StackerError> {
+/// ```no_run
+/// use libstacker::{ecc_match, collect_image_files, EccMatchParameters, StackerError};
+/// use std::path::PathBuf;
+/// use opencv::prelude::*;
+/// # fn f() -> Result<(),StackerError> {
+/// let ecc_match_img = ecc_match(
+///    collect_image_files(&PathBuf::from("image_stacking_py/images"))?,
+///    EccMatchParameters {
+///       max_count: Some(10000),
+///       epsilon: Some(1e-10),
+///       gauss_filt_size: 5,
+///    })?;
+/// # Ok(())}
+/// ```
+pub fn ecc_match(files: Vec<PathBuf>, params: EccMatchParameters) -> Result<Mat, StackerError> {
     let criteria = Result::<TermCriteria, StackerError>::from(&params)?;
 
-    #[allow(clippy::unnecessary_lazy_evaluations)]
-    let (first_file, rest_of_the_files) = files
-        .split_first()
-        .ok_or_else(|| StackerError::NotEnoughFiles)?;
+    let (first_file, rest_of_the_files) =
+        files.split_first().ok_or(StackerError::NotEnoughFiles)?;
     let (first_img, stacked_img) = read_grey_f32(first_file)?;
     let first_img = UnsafeMatSyncWrapper(first_img);
     let stacked_img: Arc<Mutex<Mat>> = Arc::new(Mutex::new(stacked_img));
@@ -257,7 +287,6 @@ pub fn ecc_match(
                 opencv::video::MOTION_HOMOGRAPHY,
                 criteria,
                 &Mat::default(),
-                // TODO: I have no idea what parameter to use
                 params.gauss_filt_size,
             )?;
 

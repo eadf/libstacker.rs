@@ -1,18 +1,20 @@
 [package]
-
 authors = ["eadf <lacklustr@protonmail.com>"]
 name = "libstacker"
 license = "MIT OR Apache-2.0"
 version = "0.0.1"
 edition = "2018"
+readme = "README.md"
 keywords = ["opencv", "image_stacking"]
+repository = "https://github.com/eadf/libstacker.rs"
+description = "Image stacker functions based on OpenCV"
 
 [[example]]
 name = "main"
 path = "examples/main.rs"
 
 [dependencies]
-opencv = "0.57"
+opencv = "0.58"
 thiserror = "1.0"
 ordered-float = "2.8"
 itertools = "0.10"

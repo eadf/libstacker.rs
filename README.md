@@ -1,7 +1,7 @@
 [![crates.io](https://img.shields.io/crates/v/libstacker.svg)](https://crates.io/crates/libstacker)
 [![Documentation](https://docs.rs/libstacker/badge.svg)](https://docs.rs/libstacker)
 [![Workflow](https://github.com/eadf/libstacker.rs/workflows/Rust/badge.svg)](https://github.com/eadf/libstacker.rs/workflows/Rust/badge.svg)
-[![dependency status](https://deps.rs/crate/libstacker/0.0.1/status.svg)](https://deps.rs/crate/libstacker/0.0.1)
+[![dependency status](https://deps.rs/crate/libstacker/0.0.2/status.svg)](https://deps.rs/crate/libstacker/0.0.2)
 ![license](https://img.shields.io/crates/l/libstacker)
 
 # libstacker
@@ -51,7 +51,7 @@ let ecc_match_img:opencv::Mat = ecc_match(
 ## Todo
 
 * Figure out what to do with `.reshape()` in `keypoint_match()`
-* ~~Figure out some opencv parameters~~ responsibility shifted to end user.
+* ~~Figure out some opencv parameters~~ responsibility sneakily shifted to end user.
 * Command line options in the example
 
 ## License

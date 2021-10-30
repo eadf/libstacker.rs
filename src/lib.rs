@@ -103,7 +103,7 @@ pub struct KeyPointMatchParameters {
 /// All `files` will be stacked and returned as a `Mat<f32>`.
 /// The first file will be used as the template the other files are matched against.
 /// This should be the image with best focus.
-/// ```no_run
+/// ```ignore
 /// use libstacker::{keypoint_match, collect_image_files, KeyPointMatchParameters, StackerError};
 /// use std::path::PathBuf;
 /// use opencv::prelude::*;
@@ -249,7 +249,7 @@ impl From<&EccMatchParameters> for Result<TermCriteria, StackerError> {
 /// All `files` will be stacked and returned as a `Mat<f32>`.
 /// The first file will be used as the template the other files are matched against.
 /// This should be the image with best focus.
-/// ```no_run
+/// ```ignore
 /// use libstacker::{ecc_match, collect_image_files, EccMatchParameters, StackerError};
 /// use std::path::PathBuf;
 /// use opencv::prelude::*;

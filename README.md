@@ -1,7 +1,7 @@
 [![crates.io](https://img.shields.io/crates/v/libstacker.svg)](https://crates.io/crates/libstacker)
 [![Documentation](https://docs.rs/libstacker/badge.svg)](https://docs.rs/libstacker)
 [![Workflow](https://github.com/eadf/libstacker.rs/workflows/Rust/badge.svg)](https://github.com/eadf/libstacker.rs/workflows/Rust/badge.svg)
-[![dependency status](https://deps.rs/crate/libstacker/0.0.2/status.svg)](https://deps.rs/crate/libstacker/0.0.2)
+[![dependency status](https://deps.rs/crate/libstacker/0.0.3/status.svg)](https://deps.rs/crate/libstacker/0.0.3)
 ![license](https://img.shields.io/crates/l/libstacker)
 
 # libstacker
@@ -25,7 +25,7 @@ and then wait a few seconds. The result should be two windows showing the stacke
 
 ## API
 ```rust
-let keypoint_match_img:opencv::Mat = keypoint_match(
+let keypoint_match_img:opencv::core::Mat = keypoint_match(
    // a Vec<PathBuf> containing paths to image files
    collect_image_files(&PathBuf::from("image_stacking_py/images"))?,
    KeyPointMatchParameters {
@@ -37,10 +37,11 @@ let keypoint_match_img:opencv::Mat = keypoint_match(
 
 Depending on the parameters the `ecc_match()` is much slower, but also more accurate. 
 ```rust
-let ecc_match_img:opencv::Mat = ecc_match(
+let ecc_match_img:opencv::core::Mat = ecc_match(
    // a Vec<PathBuf> containing paths to image files
    collect_image_files(&PathBuf::from("image_stacking_py/images"))?,
    EccMatchParameters {
+      motion_type: MotionType::Homography,
       max_count: Some(5000),
       epsilon: Some(1e-5),
       gauss_filt_size: 5,

@@ -1,14 +1,22 @@
-//! This library contains image stacking functions, based on OpenCV <https://crates.io/crates/opencv>
+//! This library contains multi-threaded image stacking functions,
+//! based on OpenCV <https://crates.io/crates/opencv> and Rayon <https://crates.io/crates/rayon>.
 //!
-//! The library is a multi-threaded port of code written by Mathias Sundholm Copyright (c) 2021 <https://github.com/maitek/image_stacking>
-//!
-//! Copyright (c) 2021 Eadf <lacklustr@protonmail.com>
+//! Copyright (c) 2021 Eadf <lacklustr@protonmail.com>.
 //! License: MIT/Apache 2.0
+//!
+//! The is a port of code written by Mathias Sundholm.
+//! Copyright (c) 2021 <https://github.com/maitek/image_stacking>
+//! License: MIT
+//!
+//! Read more about image alignment with OpenCV here:
+//! <https://learnopencv.com/image-alignment-ecc-in-opencv-c-python>
 
-use opencv::core::TermCriteria;
 use opencv::{
     calib3d,
-    core::{self, KeyPoint, Mat, MatExpr, MatExprResult, Scalar, TermCriteria_Type, Vector},
+    core::{
+        self, KeyPoint, Mat, MatExpr, MatExprResult, Scalar, TermCriteria, TermCriteria_Type,
+        Vector,
+    },
     features2d::{BFMatcher, ORB},
     imgcodecs::{self, imread},
     imgproc,
@@ -93,22 +101,22 @@ fn orb_detect_and_compute(file: &Path) -> Result<(Mat, Vector<KeyPoint>, Mat), S
 pub struct KeyPointMatchParameters {
     /// parameter used in `opencv::calib3d::find_homography()`
     /// Should probably always be `opencv::calib3d::RANSAC`
-    // TODO: maybe remove?
     pub method: i32,
     /// parameter used in `opencv::calib3d::find_homography()`
     pub ransac_reproj_threshold: f64,
 }
 
-/// Stacks images using OpenCV keypoint match method.
-/// All `files` will be stacked and returned as a `Mat<f32>`.
-/// The first file will be used as the template the other files are matched against.
-/// This should be the image with best focus.
-/// ```ignore
+/// Stacks images using the OpenCV keypoint match alignment method.
+/// All `files` will be aligned and stacked together. The result is returned as a `Mat<f32>`.
+/// All images will be position-matched against the first image,
+/// so the first image should, preferably, be the one with best focus.
+// no_run because the test uses files that might not be present
+/// ```no_run
 /// use libstacker::{keypoint_match, collect_image_files, KeyPointMatchParameters, StackerError};
 /// use std::path::PathBuf;
 /// use opencv::prelude::*;
 /// # fn f() -> Result<(),StackerError> {
-/// let keypoint_match_img = keypoint_match(
+/// let keypoint_match_img:opencv::core::Mat = keypoint_match(
 ///     collect_image_files(&PathBuf::from("image_stacking_py/images"))?,
 ///     KeyPointMatchParameters {
 ///         method: opencv::calib3d::RANSAC,
@@ -219,9 +227,18 @@ fn read_grey_f32(filename: &Path) -> Result<(Mat, Mat), StackerError> {
     Ok((img_grey, img_f32))
 }
 
-#[derive(Debug)]
+#[derive(Debug, Copy, Clone)]
+pub enum MotionType {
+    Homography = opencv::video::MOTION_HOMOGRAPHY as isize,
+    Affine = opencv::video::MOTION_AFFINE as isize,
+    Euclidean = opencv::video::MOTION_EUCLIDEAN as isize,
+    Translation = opencv::video::MOTION_TRANSLATION as isize,
+}
+
+#[derive(Debug, Copy, Clone)]
 /// Structure containing the opencv parameters needed to calculate `ecc_match()`
 pub struct EccMatchParameters {
+    pub motion_type: MotionType,
     /// parameter used as `opencv::core::TermCriteria::max_count`
     pub max_count: Option<i32>,
     /// parameter used as `opencv::core::TermCriteria::epsilon`
@@ -230,8 +247,21 @@ pub struct EccMatchParameters {
     pub gauss_filt_size: i32,
 }
 
-impl From<&EccMatchParameters> for Result<TermCriteria, StackerError> {
-    fn from(r: &EccMatchParameters) -> Result<TermCriteria, StackerError> {
+impl From<EccMatchParameters> for Result<TermCriteria, StackerError> {
+    /// Converts from a `EccMatchParameters` to TermCriteria
+    /// ```
+    /// # use libstacker::{EccMatchParameters, MotionType, StackerError};
+    /// # use opencv::core::{TermCriteria, TermCriteria_Type};
+    /// let t:Result<TermCriteria, StackerError> = EccMatchParameters{
+    ///     motion_type: MotionType::Euclidean,
+    ///     max_count: None,
+    ///     epsilon: Some(0.1),
+    ///     gauss_filt_size:3}.into();
+    /// let t = t.unwrap();
+    /// assert_eq!(t.epsilon, 0.1);
+    /// assert_eq!(t.typ, TermCriteria_Type::EPS as i32);
+    /// ```
+    fn from(r: EccMatchParameters) -> Result<TermCriteria, StackerError> {
         let mut rv = TermCriteria::default()?;
         if let Some(max_count) = r.max_count {
             rv.typ |= TermCriteria_Type::COUNT as i32;
@@ -245,18 +275,21 @@ impl From<&EccMatchParameters> for Result<TermCriteria, StackerError> {
     }
 }
 
-/// Stacks images using OpenCV ECC method.
-/// All `files` will be stacked and returned as a `Mat<f32>`.
-/// The first file will be used as the template the other files are matched against.
-/// This should be the image with best focus.
-/// ```ignore
-/// use libstacker::{ecc_match, collect_image_files, EccMatchParameters, StackerError};
+/// Stacks images using the OpenCV ECC alignment method.
+/// <https://learnopencv.com/image-alignment-ecc-in-opencv-c-python>
+/// All `files` will be aligned and stacked together. The result is returned as a `Mat<f32>`.
+/// All images will be position-matched against the first image,
+/// so the first image should, preferably, be the one with best focus.
+// no_run because the test uses files that might not be present
+/// ```no_run
+/// use libstacker::{ecc_match, collect_image_files, EccMatchParameters, StackerError, MotionType};
 /// use std::path::PathBuf;
 /// use opencv::prelude::*;
 /// # fn f() -> Result<(),StackerError> {
-/// let ecc_match_img = ecc_match(
+/// let ecc_match_img:opencv::core::Mat = ecc_match(
 ///    collect_image_files(&PathBuf::from("image_stacking_py/images"))?,
 ///    EccMatchParameters {
+///       motion_type: MotionType::Homography,
 ///       max_count: Some(10000),
 ///       epsilon: Some(1e-10),
 ///       gauss_filt_size: 5,
@@ -264,7 +297,7 @@ impl From<&EccMatchParameters> for Result<TermCriteria, StackerError> {
 /// # Ok(())}
 /// ```
 pub fn ecc_match(files: Vec<PathBuf>, params: EccMatchParameters) -> Result<Mat, StackerError> {
-    let criteria = Result::<TermCriteria, StackerError>::from(&params)?;
+    let criteria = Result::<TermCriteria, StackerError>::from(params)?;
 
     let (first_file, rest_of_the_files) =
         files.split_first().ok_or(StackerError::NotEnoughFiles)?;
@@ -284,7 +317,7 @@ pub fn ecc_match(files: Vec<PathBuf>, params: EccMatchParameters) -> Result<Mat,
                 &img_grey,
                 &first_img.0,
                 &mut warp_matrix,
-                opencv::video::MOTION_HOMOGRAPHY,
+                params.motion_type as i32,
                 criteria,
                 &Mat::default(),
                 params.gauss_filt_size,
@@ -297,7 +330,7 @@ pub fn ecc_match(files: Vec<PathBuf>, params: EccMatchParameters) -> Result<Mat,
                 &mut warped_image,
                 &warp_matrix,
                 img_f32.size()?,
-                opencv::video::MOTION_HOMOGRAPHY,
+                params.motion_type as i32,
                 core::BORDER_CONSTANT,
                 Scalar::default(),
             )?;

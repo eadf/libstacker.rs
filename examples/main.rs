@@ -1,6 +1,6 @@
 use libstacker::{
     collect_image_files, ecc_match, keypoint_match, EccMatchParameters, KeyPointMatchParameters,
-    StackerError,
+    MotionType, StackerError,
 };
 use opencv::highgui::{imshow, wait_key};
 use std::path::PathBuf;
@@ -20,6 +20,7 @@ fn main() -> Result<(), StackerError> {
     let ecc_match_img = ecc_match(
         collect_image_files(&PathBuf::from("image_stacking_py/images"))?,
         EccMatchParameters {
+            motion_type: MotionType::Homography,
             max_count: Some(5000),
             epsilon: Some(1e-5),
             gauss_filt_size: 5,

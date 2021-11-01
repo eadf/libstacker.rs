@@ -7,6 +7,10 @@
 # libstacker
 A multi-threaded port of the python code found [here: github.com/maitek/image_stacking](https://github.com/maitek/image_stacking) 
 
+This crate contains multi-threaded functions that aligns and stacks images using [OpenCV](https://crates.io/crates/opencv) and [Rayon](https://crates.io/crates/rayon).
+
+Read more about image alignment with OpenCV [here](https://learnopencv.com/image-alignment-ecc-in-opencv-c-python).
+
 ## Usage:
 ### Download the test images:
 

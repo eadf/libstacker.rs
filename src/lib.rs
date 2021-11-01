@@ -11,6 +11,7 @@
 //! Read more about image alignment with OpenCV here:
 //! <https://learnopencv.com/image-alignment-ecc-in-opencv-c-python>
 
+pub use opencv;
 use opencv::{
     calib3d,
     core::{
@@ -104,6 +105,8 @@ pub struct KeyPointMatchParameters {
     pub method: i32,
     /// parameter used in `opencv::calib3d::find_homography()`
     pub ransac_reproj_threshold: f64,
+    // todo: Add border_mode: core::BORDER_CONSTANT,border_value: Scalar::default(),
+    // todo: impl Default
 }
 
 /// Stacks images using the OpenCV keypoint match alignment method.
@@ -227,7 +230,7 @@ fn read_grey_f32(filename: &Path) -> Result<(Mat, Mat), StackerError> {
     Ok((img_grey, img_f32))
 }
 
-#[derive(Debug, Copy, Clone)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
 pub enum MotionType {
     Homography = opencv::video::MOTION_HOMOGRAPHY as isize,
     Affine = opencv::video::MOTION_AFFINE as isize,
@@ -245,6 +248,8 @@ pub struct EccMatchParameters {
     pub epsilon: Option<f64>,
     /// parameter used in `opencv::video::find_transform_ecc()`
     pub gauss_filt_size: i32,
+    // todo: Add border_mode: core::BORDER_CONSTANT & border_value: Scalar::default(),
+    // todo: impl Default
 }
 
 impl From<EccMatchParameters> for Result<TermCriteria, StackerError> {
@@ -311,7 +316,12 @@ pub fn ecc_match(files: Vec<PathBuf>, params: EccMatchParameters) -> Result<Mat,
             let (img_grey, img_f32) = read_grey_f32(file)?;
 
             // s, M = cv2.findTransformECC(cv2.cvtColor(image,cv2.COLOR_BGR2GRAY), first_image, M, cv2.MOTION_HOMOGRAPHY)
-            let mut warp_matrix = Mat::default();
+
+            let mut warp_matrix = if params.motion_type != MotionType::Homography {
+                Mat::eye(2, 3, opencv::core::CV_32F)?.to_mat()?
+            } else {
+                Mat::eye(3, 3, opencv::core::CV_32F)?.to_mat()?
+            };
 
             let _ = opencv::video::find_transform_ecc(
                 &img_grey,
@@ -322,18 +332,32 @@ pub fn ecc_match(files: Vec<PathBuf>, params: EccMatchParameters) -> Result<Mat,
                 &Mat::default(),
                 params.gauss_filt_size,
             )?;
-
-            // image = cv2.warpPerspective(image, M, (h, w))
             let mut warped_image = Mat::default();
-            imgproc::warp_perspective(
-                &img_f32,
-                &mut warped_image,
-                &warp_matrix,
-                img_f32.size()?,
-                params.motion_type as i32,
-                core::BORDER_CONSTANT,
-                Scalar::default(),
-            )?;
+
+            if params.motion_type != MotionType::Homography {
+                // Use warp_affine() for Translation, Euclidean and Affine
+                imgproc::warp_affine(
+                    &img_f32,
+                    &mut warped_image,
+                    &warp_matrix,
+                    img_f32.size()?,
+                    imgproc::INTER_LINEAR,
+                    core::BORDER_CONSTANT,
+                    Scalar::default(),
+                )?;
+            } else {
+                // Use warp_perspective() for Homography
+                // image = cv2.warpPerspective(image, M, (h, w))
+                imgproc::warp_perspective(
+                    &img_f32,
+                    &mut warped_image,
+                    &warp_matrix,
+                    img_f32.size()?,
+                    imgproc::INTER_LINEAR,
+                    core::BORDER_CONSTANT,
+                    Scalar::default(),
+                )?;
+            }
             if let Ok(mut stacked_img) = stacked_img.lock() {
                 // For some reason a mutex guard won't allow (*a + &b)
                 let taken_stacked_img = std::mem::take(&mut *stacked_img);

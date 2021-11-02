@@ -1,15 +1,37 @@
-use libstacker::{
-    collect_image_files, ecc_match, keypoint_match, EccMatchParameters, KeyPointMatchParameters,
-    MotionType, StackerError,
-};
-use opencv::highgui::{imshow, wait_key};
-use std::path::PathBuf;
+use opencv::{highgui, imgcodecs};
+use rayon::prelude::*;
+use std::path;
 
-fn main() -> Result<(), StackerError> {
+fn main() -> Result<(), libstacker::StackerError> {
+    let files = libstacker::collect_image_files(&path::PathBuf::from("image_stacking_py/images"))?;
     let now = std::time::Instant::now();
-    let keypoint_match_img = keypoint_match(
-        collect_image_files(&PathBuf::from("image_stacking_py/images"))?,
-        KeyPointMatchParameters {
+    let mut files = files
+        .into_par_iter()
+        .map(|f| -> Result<_, libstacker::StackerError> {
+            let img_gray = imgcodecs::imread(f.to_str().unwrap(), imgcodecs::IMREAD_GRAYSCALE)?;
+            Ok((
+                f,
+                libstacker::sharpness_modified_laplacian(&img_gray)?,
+                libstacker::sharpness_variance_of_laplacian(&img_gray)?,
+                libstacker::sharpness_normalized_gray_level_variance(&img_gray)?,
+            ))
+        })
+        .collect::<Result<Vec<_>, libstacker::StackerError>>()?;
+    println!("Calculated sharpness() in {:?}", now.elapsed());
+
+    // sort images by sharpness using LAPM for now
+    files.sort_by_key(|f| ordered_float::OrderedFloat(f.1));
+
+    for f in files.iter() {
+        println!("{:?} LAPM:{} LAPV:{} GLVN:{}", f.0, f.1, f.2, f.3,);
+    }
+    // only keep the filename and skip the last file (the bad one)
+    let files: Vec<_> = files.into_iter().map(|f| f.0).rev().skip(1).rev().collect();
+
+    let now = std::time::Instant::now();
+    let keypoint_match_img = libstacker::keypoint_match(
+        files.clone(),
+        libstacker::KeyPointMatchParameters {
             method: opencv::calib3d::RANSAC,
             ransac_reproj_threshold: 5.0,
         },
@@ -17,10 +39,10 @@ fn main() -> Result<(), StackerError> {
     println!("Calculated keypoint_match() in {:?}", now.elapsed());
 
     let now = std::time::Instant::now();
-    let ecc_match_img = ecc_match(
-        collect_image_files(&PathBuf::from("image_stacking_py/images"))?,
-        EccMatchParameters {
-            motion_type: MotionType::Homography,
+    let ecc_match_img = libstacker::ecc_match(
+        files,
+        libstacker::EccMatchParameters {
+            motion_type: libstacker::MotionType::Homography,
             max_count: Some(5000),
             epsilon: Some(1e-5),
             gauss_filt_size: 5,
@@ -28,9 +50,9 @@ fn main() -> Result<(), StackerError> {
     )?;
     println!("Calculated ecc_match() in {:?}", now.elapsed());
 
-    while wait_key(33)? != 27 {
-        let _ = imshow("KeyPoint match", &keypoint_match_img)?;
-        let _ = imshow("ECC match", &ecc_match_img)?;
+    while highgui::wait_key(33)? != 27 {
+        let _ = highgui::imshow("KeyPoint match", &keypoint_match_img)?;
+        let _ = highgui::imshow("ECC match", &ecc_match_img)?;
     }
     Ok(())
 }

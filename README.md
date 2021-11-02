@@ -25,7 +25,8 @@ Opencv-rust can be little tricky to install. Follow the instructions from [rust 
 
 ```cargo run --example main --release```
 
-and then wait a few seconds. The result should be two windows showing the stacked images.
+and then wait a few seconds. The program should sort the images by quality, drop the least sharp image, and align and stack the rest. 
+The result should be two windows showing the stacked images using two different alignment methods.
 
 ## API
 ```rust

@@ -408,7 +408,7 @@ pub fn sharpness_modified_laplacian(src_mat: &Mat) -> Result<f64, StackerError> 
     Ok(*core::mean(&fm, &Mat::default())?
         .0
         .get(0)
-        .unwrap_or(&(-f64::MAX)))
+        .unwrap_or(&f64::MAX))
 }
 
 /// Detect sharpness of an image <https://stackoverflow.com/a/7768918>
@@ -456,7 +456,7 @@ impl SetMValue for Mat {
     #[inline]
     /// ```
     /// use libstacker::SetMValue;
-    /// # use opencv::prelude::MatTraitConst;
+    /// use opencv::prelude::MatTraitConst;
     /// let mut m = unsafe { opencv::core::Mat::new_rows_cols(1, 3, opencv::core::CV_64FC1).unwrap() };
     /// m.set_2d::<f64>(0, 0, -1.0).unwrap();
     /// m.set_2d::<f64>(0, 1, -2.0).unwrap();
@@ -472,7 +472,6 @@ impl SetMValue for Mat {
         value: T,
     ) -> Result<(), StackerError> {
         let v = self.at_2d_mut::<T>(row, col)?;
-        *v = value;
-        Ok(())
+        Ok(*v = value)
     }
 }

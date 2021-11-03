@@ -1,4 +1,4 @@
-use opencv::{highgui, imgcodecs};
+use libstacker::opencv::{highgui, imgcodecs};
 use rayon::prelude::*;
 use std::path;
 

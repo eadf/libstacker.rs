@@ -43,7 +43,7 @@ pub enum StackerError {
     PoisonError(#[from] std::sync::PoisonError<core::MatExprResult<core::MatExpr>>),
 }
 
-/// Returns paths all (.jpg,jpeg,tif,png) files in a single directory (non-recursive)
+/// Returns paths to all jpg,jpeg,tif and png files in a single directory (non-recursive)
 pub fn collect_image_files(path: &path::Path) -> Result<Vec<path::PathBuf>, StackerError> {
     Ok(std::fs::read_dir(path)?
         .into_iter()
@@ -61,7 +61,7 @@ pub fn collect_image_files(path: &path::Path) -> Result<Vec<path::PathBuf>, Stac
         .collect())
 }
 
-/// Opens an image file. Returns a (`Mat<f32>`, keypoints and descriptors) tuple of the file
+/// Opens an image file. Returns a (`Mat<f32>`, key-points and descriptors) tuple of the file
 fn orb_detect_and_compute(
     file: &path::Path,
 ) -> Result<(Mat, core::Vector<core::KeyPoint>, Mat), StackerError> {
@@ -95,9 +95,8 @@ pub struct KeyPointMatchParameters {
 /// so the first image should, preferably, be the one with best focus.
 // no_run because the test uses files that might not be present
 /// ```no_run
-/// use libstacker::{keypoint_match, collect_image_files, KeyPointMatchParameters, StackerError};
+/// use libstacker::{opencv::prelude::*, keypoint_match, collect_image_files, KeyPointMatchParameters, StackerError};
 /// use std::path::PathBuf;
-/// use opencv::prelude::*;
 /// # fn f() -> Result<(),StackerError> {
 /// let keypoint_match_img:opencv::core::Mat = keypoint_match(
 ///     collect_image_files(&PathBuf::from("image_stacking_py/images"))?,
@@ -237,8 +236,7 @@ pub struct EccMatchParameters {
 impl From<EccMatchParameters> for Result<core::TermCriteria, StackerError> {
     /// Converts from a `EccMatchParameters` to TermCriteria
     /// ```
-    /// # use libstacker::{EccMatchParameters, MotionType, StackerError};
-    /// # use opencv::core::{TermCriteria, TermCriteria_Type};
+    /// # use libstacker::{opencv::core::{TermCriteria, TermCriteria_Type},EccMatchParameters, MotionType, StackerError};
     /// let t:Result<TermCriteria, StackerError> = EccMatchParameters{
     ///     motion_type: MotionType::Euclidean,
     ///     max_count: None,
@@ -269,9 +267,8 @@ impl From<EccMatchParameters> for Result<core::TermCriteria, StackerError> {
 /// so the first image should, preferably, be the one with best focus.
 // no_run because the test uses files that might not be present
 /// ```no_run
-/// use libstacker::{ecc_match, collect_image_files, EccMatchParameters, StackerError, MotionType};
+/// use libstacker::{opencv::prelude::*, ecc_match, collect_image_files, EccMatchParameters, StackerError, MotionType};
 /// use std::path::PathBuf;
-/// use opencv::prelude::*;
 /// # fn f() -> Result<(),StackerError> {
 /// let ecc_match_img:opencv::core::Mat = ecc_match(
 ///    collect_image_files(&PathBuf::from("image_stacking_py/images"))?,
@@ -455,8 +452,7 @@ pub trait SetMValue {
 impl SetMValue for Mat {
     #[inline]
     /// ```
-    /// use libstacker::SetMValue;
-    /// use opencv::prelude::MatTraitConst;
+    /// use libstacker::{SetMValue,opencv::prelude::MatTraitConst};
     /// let mut m = unsafe { opencv::core::Mat::new_rows_cols(1, 3, opencv::core::CV_64FC1).unwrap() };
     /// m.set_2d::<f64>(0, 0, -1.0).unwrap();
     /// m.set_2d::<f64>(0, 1, -2.0).unwrap();

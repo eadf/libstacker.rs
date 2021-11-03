@@ -7,7 +7,7 @@ edition = "2018"
 readme = "README.md"
 keywords = ["opencv", "image_stacking"]
 repository = "https://github.com/eadf/libstacker.rs"
-description = "Image stacker functions based on OpenCV"
+description = "Image alignment and stacking functions based on OpenCV and Rayon"
 
 [[example]]
 name = "main"

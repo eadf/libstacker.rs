@@ -435,6 +435,51 @@ pub fn sharpness_variance_of_laplacian(src_mat: &Mat) -> Result<f64, StackerErro
 }
 
 /// Detect sharpness of an image <https://stackoverflow.com/a/7768918>
+/// OpenCV port of 'TENG' algorithm (Krotkov86)
+/// TODO: This function does not, yet, work as intended
+pub fn sharpness_tenengrad(src_mat: &Mat, k_size: i32) -> Result<f64, StackerError> {
+    let mut gx = Mat::default();
+    let mut gy = Mat::default();
+    imgproc::sobel(
+        src_mat,
+        &mut gx,
+        core::CV_64FC1,
+        1,
+        0,
+        k_size,
+        1.0,
+        0.0,
+        core::BORDER_DEFAULT,
+    )?;
+    imgproc::sobel(
+        src_mat,
+        &mut gy,
+        core::CV_64FC1,
+        0,
+        1,
+        k_size,
+        1.0,
+        0.0,
+        core::BORDER_DEFAULT,
+    )?;
+
+    let gx = {
+        //let gx_clone = gx.clone();
+        //let gy_clone = gy.clone();
+        // todo: how to do a_mat*a_mat without cloning?
+        // todo: squaring the mat always fails
+        (gx /* *gx_clone */  + gy/* *gy_clone */)
+            .into_result()?
+            .to_mat()?
+    };
+
+    Ok(*core::mean(&gx, &Mat::default())?
+        .0
+        .get(0)
+        .unwrap_or(&f64::MAX))
+}
+
+/// Detect sharpness of an image <https://stackoverflow.com/a/7768918>
 /// OpenCV port of 'GLVN' algorithm (Santos97)
 pub fn sharpness_normalized_gray_level_variance(src_mat: &Mat) -> Result<f64, StackerError> {
     let mut mu = Mat::default();

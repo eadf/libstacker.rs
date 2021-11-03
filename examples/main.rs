@@ -13,6 +13,7 @@ fn main() -> Result<(), libstacker::StackerError> {
                 f,
                 libstacker::sharpness_modified_laplacian(&img_gray)?,
                 libstacker::sharpness_variance_of_laplacian(&img_gray)?,
+                libstacker::sharpness_tenengrad(&img_gray, 3)?,
                 libstacker::sharpness_normalized_gray_level_variance(&img_gray)?,
             ))
         })
@@ -23,7 +24,10 @@ fn main() -> Result<(), libstacker::StackerError> {
     files.sort_by_key(|f| ordered_float::OrderedFloat(f.1));
 
     for f in files.iter() {
-        println!("{:?} LAPM:{} LAPV:{} GLVN:{}", f.0, f.1, f.2, f.3,);
+        println!(
+            "{:?} LAPM:{: >8.5} LAPV:{: >9.5} TENG:{: >8.5} GLVN:{: >9.5}",
+            f.0, f.1, f.2, f.3, f.4
+        );
     }
     // only keep the filename and skip the last file (the bad one)
     let files: Vec<_> = files.into_iter().map(|f| f.0).rev().skip(1).rev().collect();

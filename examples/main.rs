@@ -7,7 +7,7 @@ fn main() -> Result<(), libstacker::StackerError> {
     let now = std::time::Instant::now();
     let mut files = files
         .into_par_iter()
-        .map(|f| -> Result<_, libstacker::StackerError> {
+        .map(move |f| -> Result<_, libstacker::StackerError> {
             let img_gray = imgcodecs::imread(f.to_str().unwrap(), imgcodecs::IMREAD_GRAYSCALE)?;
             Ok((
                 f,

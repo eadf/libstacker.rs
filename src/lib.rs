@@ -121,67 +121,70 @@ pub fn keypoint_match(
     let number_of_files = {
         let result: Result<Vec<()>, StackerError> = rest_of_the_files
             .into_par_iter()
-            .map(|file| -> Result<(), StackerError> {
-                let (img_f, kp, des) = orb_detect_and_compute(file)?;
+            .map({
+                let stacked_img = stacked_img.clone();
+                move |file| -> Result<(), StackerError> {
+                    let (img_f, kp, des) = orb_detect_and_compute(file)?;
 
-                let matches = {
-                    let mut matcher = features2d::BFMatcher::create(core::NORM_HAMMING, true)?;
-                    matcher.add(&des)?;
+                    let matches = {
+                        let mut matcher = features2d::BFMatcher::create(core::NORM_HAMMING, true)?;
+                        matcher.add(&des)?;
 
-                    let mut matches = core::Vector::<core::DMatch>::new();
-                    matcher.match_(&first_des.0, &mut matches, &Mat::default())?;
-                    let mut v = matches.to_vec();
-                    v.sort_by(|a, b| OrderedFloat(a.distance).cmp(&OrderedFloat(b.distance)));
-                    core::Vector::<core::DMatch>::from(v)
-                };
+                        let mut matches = core::Vector::<core::DMatch>::new();
+                        matcher.match_(&first_des.0, &mut matches, &Mat::default())?;
+                        let mut v = matches.to_vec();
+                        v.sort_by(|a, b| OrderedFloat(a.distance).cmp(&OrderedFloat(b.distance)));
+                        core::Vector::<core::DMatch>::from(v)
+                    };
 
-                //src_pts = np.float32([first_kp[m.queryIdx].pt for m in matches]).reshape(-1, 1, 2)
-                let src_pts = {
-                    let mut pts = types::VectorOfPoint2f::new();
-                    for m in matches.iter() {
-                        pts.push(first_kp.0.get(m.query_idx as usize)?.pt);
+                    //src_pts = np.float32([first_kp[m.queryIdx].pt for m in matches]).reshape(-1, 1, 2)
+                    let src_pts = {
+                        let mut pts = types::VectorOfPoint2f::new();
+                        for m in matches.iter() {
+                            pts.push(first_kp.0.get(m.query_idx as usize)?.pt);
+                        }
+                        // TODO: what to do about the reshape????? pts.reshape(-1, 1, 2);
+                        Mat::from_exact_iter(pts.into_iter())?
+                    };
+
+                    //dst_pts = np.float32([kp[m.trainIdx].pt for m in matches]).reshape(-1, 1, 2)
+                    let dst_pts = {
+                        let mut pts = types::VectorOfPoint2f::new();
+                        for m in matches.iter() {
+                            pts.push(kp.get(m.train_idx as usize)?.pt);
+                        }
+                        // TODO: what to do about the reshape????? pts.reshape(-1, 1, 2);
+                        Mat::from_exact_iter(pts.into_iter())?
+                    };
+                    let h = calib3d::find_homography(
+                        &dst_pts,
+                        &src_pts,
+                        &mut Mat::default(),
+                        params.method,
+                        params.ransac_reproj_threshold,
+                    )?;
+
+                    let mut warped_image = Mat::default();
+                    imgproc::warp_perspective(
+                        &img_f,
+                        &mut warped_image,
+                        &h,
+                        img_f.size()?,
+                        imgproc::INTER_LINEAR,
+                        core::BORDER_CONSTANT,
+                        core::Scalar::default(),
+                    )?;
+
+                    if let Ok(mut stacked_img) = stacked_img.lock() {
+                        // For some reason a mutex guard won't allow (*a + &b)
+                        let taken_stacked_img = std::mem::take(&mut *stacked_img);
+                        *stacked_img = (taken_stacked_img + &warped_image)
+                            .into_result()?
+                            .to_mat()?;
+                        Ok(())
+                    } else {
+                        Err(StackerError::MutexError)
                     }
-                    // TODO: what to do about the reshape????? pts.reshape(-1, 1, 2);
-                    Mat::from_exact_iter(pts.into_iter())?
-                };
-
-                //dst_pts = np.float32([kp[m.trainIdx].pt for m in matches]).reshape(-1, 1, 2)
-                let dst_pts = {
-                    let mut pts = types::VectorOfPoint2f::new();
-                    for m in matches.iter() {
-                        pts.push(kp.get(m.train_idx as usize)?.pt);
-                    }
-                    // TODO: what to do about the reshape????? pts.reshape(-1, 1, 2);
-                    Mat::from_exact_iter(pts.into_iter())?
-                };
-                let h = calib3d::find_homography(
-                    &dst_pts,
-                    &src_pts,
-                    &mut Mat::default(),
-                    params.method,
-                    params.ransac_reproj_threshold,
-                )?;
-
-                let mut warped_image = Mat::default();
-                imgproc::warp_perspective(
-                    &img_f,
-                    &mut warped_image,
-                    &h,
-                    img_f.size()?,
-                    imgproc::INTER_LINEAR,
-                    core::BORDER_CONSTANT,
-                    core::Scalar::default(),
-                )?;
-
-                if let Ok(mut stacked_img) = stacked_img.lock() {
-                    // For some reason a mutex guard won't allow (*a + &b)
-                    let taken_stacked_img = std::mem::take(&mut *stacked_img);
-                    *stacked_img = (taken_stacked_img + &warped_image)
-                        .into_result()?
-                        .to_mat()?;
-                    Ok(())
-                } else {
-                    Err(StackerError::MutexError)
                 }
             })
             .collect();
@@ -295,61 +298,64 @@ pub fn ecc_match(
     let number_of_files = {
         let result: Result<Vec<()>, StackerError> = rest_of_the_files
             .into_par_iter()
-            .map(|file| -> Result<(), StackerError> {
-                let (img_grey, img_f32) = read_grey_f32(file)?;
+            .map({
+                let stacked_img = stacked_img.clone();
+                move |file| -> Result<(), StackerError> {
+                    let (img_grey, img_f32) = read_grey_f32(file)?;
 
-                // s, M = cv2.findTransformECC(cv2.cvtColor(image,cv2.COLOR_BGR2GRAY), first_image, M, cv2.MOTION_HOMOGRAPHY)
+                    // s, M = cv2.findTransformECC(cv2.cvtColor(image,cv2.COLOR_BGR2GRAY), first_image, M, cv2.MOTION_HOMOGRAPHY)
 
-                let mut warp_matrix = if params.motion_type != MotionType::Homography {
-                    Mat::eye(2, 3, opencv::core::CV_32F)?.to_mat()?
-                } else {
-                    Mat::eye(3, 3, opencv::core::CV_32F)?.to_mat()?
-                };
+                    let mut warp_matrix = if params.motion_type != MotionType::Homography {
+                        Mat::eye(2, 3, opencv::core::CV_32F)?.to_mat()?
+                    } else {
+                        Mat::eye(3, 3, opencv::core::CV_32F)?.to_mat()?
+                    };
 
-                let _ = opencv::video::find_transform_ecc(
-                    &img_grey,
-                    &first_img.0,
-                    &mut warp_matrix,
-                    params.motion_type as i32,
-                    criteria,
-                    &Mat::default(),
-                    params.gauss_filt_size,
-                )?;
-                let mut warped_image = Mat::default();
-
-                if params.motion_type != MotionType::Homography {
-                    // Use warp_affine() for Translation, Euclidean and Affine
-                    imgproc::warp_affine(
-                        &img_f32,
-                        &mut warped_image,
-                        &warp_matrix,
-                        img_f32.size()?,
-                        imgproc::INTER_LINEAR,
-                        core::BORDER_CONSTANT,
-                        core::Scalar::default(),
+                    let _ = opencv::video::find_transform_ecc(
+                        &img_grey,
+                        &first_img.0,
+                        &mut warp_matrix,
+                        params.motion_type as i32,
+                        criteria,
+                        &Mat::default(),
+                        params.gauss_filt_size,
                     )?;
-                } else {
-                    // Use warp_perspective() for Homography
-                    // image = cv2.warpPerspective(image, M, (h, w))
-                    imgproc::warp_perspective(
-                        &img_f32,
-                        &mut warped_image,
-                        &warp_matrix,
-                        img_f32.size()?,
-                        imgproc::INTER_LINEAR,
-                        core::BORDER_CONSTANT,
-                        core::Scalar::default(),
-                    )?;
-                }
-                if let Ok(mut stacked_img) = stacked_img.lock() {
-                    // For some reason a mutex guard won't allow (*a + &b)
-                    let taken_stacked_img = std::mem::take(&mut *stacked_img);
-                    *stacked_img = (taken_stacked_img + &warped_image)
-                        .into_result()?
-                        .to_mat()?;
-                    Ok(())
-                } else {
-                    Err(StackerError::MutexError)
+                    let mut warped_image = Mat::default();
+
+                    if params.motion_type != MotionType::Homography {
+                        // Use warp_affine() for Translation, Euclidean and Affine
+                        imgproc::warp_affine(
+                            &img_f32,
+                            &mut warped_image,
+                            &warp_matrix,
+                            img_f32.size()?,
+                            imgproc::INTER_LINEAR,
+                            core::BORDER_CONSTANT,
+                            core::Scalar::default(),
+                        )?;
+                    } else {
+                        // Use warp_perspective() for Homography
+                        // image = cv2.warpPerspective(image, M, (h, w))
+                        imgproc::warp_perspective(
+                            &img_f32,
+                            &mut warped_image,
+                            &warp_matrix,
+                            img_f32.size()?,
+                            imgproc::INTER_LINEAR,
+                            core::BORDER_CONSTANT,
+                            core::Scalar::default(),
+                        )?;
+                    }
+                    if let Ok(mut stacked_img) = stacked_img.lock() {
+                        // For some reason a mutex guard won't allow (*a + &b)
+                        let taken_stacked_img = std::mem::take(&mut *stacked_img);
+                        *stacked_img = (taken_stacked_img + &warped_image)
+                            .into_result()?
+                            .to_mat()?;
+                        Ok(())
+                    } else {
+                        Err(StackerError::MutexError)
+                    }
                 }
             })
             .collect();

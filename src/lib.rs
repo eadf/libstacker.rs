@@ -468,6 +468,7 @@ impl SetMValue for Mat {
         value: T,
     ) -> Result<(), StackerError> {
         let v = self.at_2d_mut::<T>(row, col)?;
-        Ok(*v = value)
+        *v = value;
+        Ok(())
     }
 }

@@ -56,6 +56,7 @@ let ecc_match_img:opencv::core::Mat = ecc_match(
 
 ## Todo
 
+* Figure out the docs.rs problem
 * Figure out what to do with `.reshape()` in `keypoint_match()`
 * ~~Figure out some opencv parameters~~ responsibility sneakily shifted to end user.
 * Command line options in the example

@@ -53,10 +53,7 @@ pub fn collect_image_files(path: &path::Path) -> Result<Vec<path::PathBuf>, Stac
         .filter(|p| p.extension().is_some() && p.extension().unwrap().to_str().is_some())
         .filter(|p| {
             let extension = p.extension().unwrap().to_str().unwrap().to_uppercase();
-            extension.starts_with("JPG")
-                || extension.starts_with("JPEG")
-                || extension.starts_with("TIF")
-                || extension.starts_with("PNG")
+            extension == "JPG" || extension == "JPEG" || extension == "TIF" || extension == "PNG"
         })
         .collect())
 }

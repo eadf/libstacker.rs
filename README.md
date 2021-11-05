@@ -1,7 +1,7 @@
 [![crates.io](https://img.shields.io/crates/v/libstacker.svg)](https://crates.io/crates/libstacker)
 [![Documentation](https://docs.rs/libstacker/badge.svg)](https://docs.rs/libstacker)
 [![Workflow](https://github.com/eadf/libstacker.rs/workflows/Rust/badge.svg)](https://github.com/eadf/libstacker.rs/workflows/Rust/badge.svg)
-[![dependency status](https://deps.rs/crate/libstacker/0.0.4/status.svg)](https://deps.rs/crate/libstacker/0.0.4)
+[![dependency status](https://deps.rs/crate/libstacker/0.0.5/status.svg)](https://deps.rs/crate/libstacker/0.0.5)
 ![license](https://img.shields.io/crates/l/libstacker)
 
 # libstacker
@@ -59,7 +59,7 @@ let ecc_match_img:opencv::core::Mat = ecc_match(
 * Figure out the docs.rs problem
 * Figure out what to do with `.reshape()` in `keypoint_match()`
 * ~~Figure out some opencv parameters~~ responsibility sneakily shifted to end user.
-* complete the `sharpness_tenengrad()` function. Mat not square?
+* Complete the `sharpness_tenengrad()` function. Mat not square?
 * Command line options in the example
 
 ## License

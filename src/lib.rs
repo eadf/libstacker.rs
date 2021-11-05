@@ -12,7 +12,7 @@
 //! <https://learnopencv.com/image-alignment-ecc-in-opencv-c-python>
 
 pub use opencv;
-use opencv::{calib3d, core, features2d, imgcodecs, imgproc, prelude::*, types, Result};
+use opencv::{calib3d, core, features2d, imgcodecs, imgproc, prelude::*, types};
 use ordered_float::OrderedFloat;
 use rayon::prelude::*;
 use std::path;

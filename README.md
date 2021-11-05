@@ -59,6 +59,7 @@ let ecc_match_img:opencv::core::Mat = ecc_match(
 * Figure out the docs.rs problem
 * Figure out what to do with `.reshape()` in `keypoint_match()`
 * ~~Figure out some opencv parameters~~ responsibility sneakily shifted to end user.
+* complete the `sharpness_tenengrad()` function. Mat not square?
 * Command line options in the example
 
 ## License

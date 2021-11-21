@@ -2,7 +2,7 @@
 authors = ["eadf <lacklustr@protonmail.com>"]
 name = "libstacker"
 license = "MIT OR Apache-2.0"
-version = "0.0.5"
+version = "0.0.6"
 edition = "2018"
 readme = "README.md"
 keywords = ["opencv", "image_stacking"]
@@ -14,7 +14,7 @@ name = "main"
 path = "examples/main.rs"
 
 [dependencies]
-opencv = "0.59"
+opencv = "0.61"
 thiserror = "1.0"
 ordered-float = "2.8"
 rayon = "1.5"

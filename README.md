@@ -1,7 +1,7 @@
 [![crates.io](https://img.shields.io/crates/v/libstacker.svg)](https://crates.io/crates/libstacker)
 [![Documentation](https://docs.rs/libstacker/badge.svg)](https://docs.rs/libstacker)
 [![Workflow](https://github.com/eadf/libstacker.rs/workflows/Rust/badge.svg)](https://github.com/eadf/libstacker.rs/workflows/Rust/badge.svg)
-[![dependency status](https://deps.rs/crate/libstacker/0.0.5/status.svg)](https://deps.rs/crate/libstacker/0.0.5)
+[![dependency status](https://deps.rs/crate/libstacker/0.0.6/status.svg)](https://deps.rs/crate/libstacker/0.0.6)
 ![license](https://img.shields.io/crates/l/libstacker)
 
 # libstacker

@@ -2,6 +2,9 @@ use libstacker::opencv::{highgui, imgcodecs};
 use rayon::prelude::*;
 use std::path;
 
+/// Run an example aligning images found under "image_stacking_py/images"
+/// The example displays two images, one is aligned with the `keypoint_match()` method,
+/// the other with `ecc_match()`
 fn main() -> Result<(), libstacker::StackerError> {
     let files = libstacker::collect_image_files(&path::PathBuf::from("image_stacking_py/images"))?;
     let now = std::time::Instant::now();

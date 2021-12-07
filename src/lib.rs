@@ -46,10 +46,8 @@ pub enum StackerError {
 /// Returns paths to all jpg,jpeg,tif and png files in a single directory (non-recursive)
 pub fn collect_image_files(path: &path::Path) -> Result<Vec<path::PathBuf>, StackerError> {
     Ok(std::fs::read_dir(path)?
-        .into_iter()
-        .filter_map(|f| f.ok())
-        .filter(|f| f.path().is_file())
-        .map(|f| f.path())
+        .filter_map(Result::ok)
+        .filter_map(|f| f.path().is_file().then(|| f.path()))
         .filter(|p| p.extension().is_some() && p.extension().unwrap().to_str().is_some())
         .filter(|p| {
             let extension = p.extension().unwrap().to_str().unwrap().to_uppercase();

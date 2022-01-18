@@ -119,6 +119,8 @@ pub fn keypoint_match(
             .map({
                 let stacked_img = stacked_img.clone();
                 move |file| -> Result<(), StackerError> {
+                    let first_des = &first_des;
+                    let first_kp = &first_kp;
                     let (img_f, kp, des) = orb_detect_and_compute(file)?;
 
                     let matches = {
@@ -296,6 +298,7 @@ pub fn ecc_match(
             .map({
                 let stacked_img = stacked_img.clone();
                 move |file| -> Result<(), StackerError> {
+                    let first_img = &first_img;
                     let (img_grey, img_f32) = read_grey_f32(file)?;
 
                     // s, M = cv2.findTransformECC(cv2.cvtColor(image,cv2.COLOR_BGR2GRAY), first_image, M, cv2.MOTION_HOMOGRAPHY)

@@ -6,6 +6,13 @@ use std::path;
 /// The example displays two images, one is aligned with the `keypoint_match()` method,
 /// the other with `ecc_match()`
 fn main() -> Result<(), libstacker::StackerError> {
+    use libstacker::opencv::core::Point;
+
+    let v = vec![Point::new(1, 5), Point::new(2, 5), Point::new(3, 5)];
+    let _ = v
+        .into_iter()
+        .collect::<libstacker::opencv::core::Vector<Point>>();
+
     let files = libstacker::collect_image_files(&path::PathBuf::from("image_stacking_py/images"))?;
     let now = std::time::Instant::now();
     let mut files = files

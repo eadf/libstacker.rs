@@ -14,7 +14,10 @@ name = "main"
 path = "examples/main.rs"
 
 [dependencies]
-opencv = "0.61"
-thiserror = "1.0"
-ordered-float = "2.8"
-rayon = "1.5"
+opencv = { version = "0.85.3" , features = ["features2d"] }
+thiserror = "1.0.50"
+ordered-float = "4.1.1"
+rayon = "1.8"
+
+[features]
+clang-runtime = ["opencv/clang-runtime"]

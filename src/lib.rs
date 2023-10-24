@@ -12,6 +12,8 @@
 //! <https://learnopencv.com/image-alignment-ecc-in-opencv-c-python>
 
 pub use opencv;
+use opencv::core::Mat;
+use opencv::features2d::ORB;
 use opencv::{calib3d, core, features2d, imgcodecs, imgproc, prelude::*, types};
 use ordered_float::OrderedFloat;
 use rayon::prelude::*;
@@ -60,7 +62,7 @@ pub fn collect_image_files(path: &path::Path) -> Result<Vec<path::PathBuf>, Stac
 fn orb_detect_and_compute(
     file: &path::Path,
 ) -> Result<(Mat, core::Vector<core::KeyPoint>, Mat), StackerError> {
-    let mut orb = <dyn ORB>::default()?;
+    let mut orb = ORB::create_def()?;
     let img = imgcodecs::imread(file.to_str().unwrap(), imgcodecs::IMREAD_COLOR)?;
     let mut img_f32 = Mat::default();
     img.convert_to(&mut img_f32, opencv::core::CV_32F, 1.0, 0.0)?;
@@ -138,7 +140,7 @@ pub fn keypoint_match(
                     let src_pts = {
                         let mut pts = types::VectorOfPoint2f::new();
                         for m in matches.iter() {
-                            pts.push(first_kp.0.get(m.query_idx as usize)?.pt);
+                            pts.push(first_kp.0.get(m.query_idx as usize)?.pt());
                         }
                         // TODO: what to do about the reshape????? pts.reshape(-1, 1, 2);
                         Mat::from_exact_iter(pts.into_iter())?
@@ -148,7 +150,7 @@ pub fn keypoint_match(
                     let dst_pts = {
                         let mut pts = types::VectorOfPoint2f::new();
                         for m in matches.iter() {
-                            pts.push(kp.get(m.train_idx as usize)?.pt);
+                            pts.push(kp.get(m.train_idx as usize)?.pt());
                         }
                         // TODO: what to do about the reshape????? pts.reshape(-1, 1, 2);
                         Mat::from_exact_iter(pts.into_iter())?
@@ -408,7 +410,7 @@ pub fn sharpness_modified_laplacian(src_mat: &Mat) -> Result<f64, StackerError> 
         .to_mat()?;
     Ok(*core::mean(&fm, &Mat::default())?
         .0
-        .get(0)
+        .first()
         .unwrap_or(&f64::MAX))
 }
 
@@ -473,7 +475,7 @@ pub fn sharpness_tenengrad(src_mat: &Mat, k_size: i32) -> Result<f64, StackerErr
 
     Ok(*core::mean(&gx, &Mat::default())?
         .0
-        .get(0)
+        .first()
         .unwrap_or(&f64::MAX))
 }
 

@@ -1,13 +1,13 @@
 [![crates.io](https://img.shields.io/crates/v/libstacker.svg)](https://crates.io/crates/libstacker)
 [![Documentation](https://docs.rs/libstacker/badge.svg)](https://docs.rs/libstacker)
 [![Workflow](https://github.com/eadf/libstacker.rs/workflows/Rust/badge.svg)](https://github.com/eadf/libstacker.rs/workflows/Rust/badge.svg)
-[![dependency status](https://deps.rs/crate/libstacker/0.0.6/status.svg)](https://deps.rs/crate/libstacker/0.0.6)
+[![dependency status](https://deps.rs/crate/libstacker/0.0.7/status.svg)](https://deps.rs/crate/libstacker/0.0.7)
 ![license](https://img.shields.io/crates/l/libstacker)
 
 # libstacker
-A multi-threaded port of the python code found [here: github.com/maitek/image_stacking](https://github.com/maitek/image_stacking) 
+A multithreaded port of the python code found [here: github.com/maitek/image_stacking](https://github.com/maitek/image_stacking) 
 
-This crate contains multi-threaded functions that aligns and stacks images using [OpenCV](https://crates.io/crates/opencv) and [Rayon](https://crates.io/crates/rayon).
+This crate contains multithreaded functions that aligns and stacks images using [OpenCV](https://crates.io/crates/opencv) and [Rayon](https://crates.io/crates/rayon).
 
 Read more about image alignment with OpenCV [here](https://learnopencv.com/image-alignment-ecc-in-opencv-c-python).
 
@@ -19,11 +19,30 @@ Read more about image alignment with OpenCV [here](https://learnopencv.com/image
 ### Build the code:
 Opencv-rust can be little tricky to install. Follow the instructions from [rust opencv](https://crates.io/crates/opencv)
 
-```cargo build --release```
+You will need the "clang-runtime" feature if you <a href="https://github.com/twistedfall/opencv-rust#Troubleshooting">experience problems with your clang environment</a>
+.
+
+```bash
+cargo build --release
+```
+
+or
+
+```bash
+cargo build --release --features "clang-runtime"
+```
 
 ### Run the example:
 
-```cargo run --example main --release```
+```bash
+cargo run --example main --release
+```
+
+or
+
+```bash
+cargo run --example main --release --features "clang-runtime"
+```
 
 and then wait a few seconds. The program should sort the images by quality, drop the least sharp image, and align and stack the rest. 
 The result should be two windows showing the stacked images using two different alignment methods.

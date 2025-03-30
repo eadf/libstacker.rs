@@ -20,7 +20,7 @@ Read more about image alignment with OpenCV [here](https://learnopencv.com/image
 Opencv-rust can be little tricky to install. Follow the instructions from [rust opencv](https://crates.io/crates/opencv)
 
 You will need the "clang-runtime" feature if you <a href="https://github.com/twistedfall/opencv-rust#Troubleshooting">experience problems with your clang environment</a>
-.
+Disclaimer: the library is only built and tested against opencv 4.11.0.
 
 ```bash
 cargo build --release
@@ -50,8 +50,8 @@ The result should be two windows showing the stacked images using two different 
 ## API
 ```rust
 let keypoint_match_img:opencv::core::Mat = keypoint_match(
-   // a Vec<PathBuf> containing paths to image files
-   collect_image_files(&PathBuf::from("image_stacking_py/images"))?,
+   // any IntoIter containing paths to image files
+   vec!["1.jpg","2.jpg","3.jpg","4.jpg","5.jpg"],
    KeyPointMatchParameters {
       method: opencv::calib3d::RANSAC,
       ransac_reproj_threshold: 5.0,
@@ -62,8 +62,8 @@ let keypoint_match_img:opencv::core::Mat = keypoint_match(
 Depending on the parameters the `ecc_match()` is much slower, but also more accurate. 
 ```rust
 let ecc_match_img:opencv::core::Mat = ecc_match(
-   // a Vec<PathBuf> containing paths to image files
-   collect_image_files(&PathBuf::from("image_stacking_py/images"))?,
+   // any IntoIter containing paths to image files
+   vec!["1.jpg","2.jpg","3.jpg","4.jpg","5.jpg"],
    EccMatchParameters {
       motion_type: MotionType::Homography,
       max_count: Some(5000),
@@ -75,11 +75,11 @@ let ecc_match_img:opencv::core::Mat = ecc_match(
 
 ## Todo
 
-* Figure out the docs.rs problem
-* Figure out what to do with `.reshape()` in `keypoint_match()`
+* ~~Figure out what to do with `.reshape()` in `keypoint_match()`~~ fixed?
 * ~~Figure out some opencv parameters~~ responsibility sneakily shifted to end user.
-* Complete the `sharpness_tenengrad()` function. Mat not square?
-* Command line options in the example
+* ~~Complete the `sharpness_tenengrad()` function. Mat not square?~~
+* (optionally) Reduce resolution before doing orb/ecc matching,
+* options in the example
 
 ## License
 

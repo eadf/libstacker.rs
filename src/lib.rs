@@ -20,6 +20,7 @@ use opencv::{calib3d, core, features2d, features2d::ORB, imgcodecs, imgproc, pre
 use ordered_float::OrderedFloat;
 use rayon::prelude::*;
 use std::path;
+use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use thiserror::Error;
 
@@ -47,22 +48,9 @@ pub enum StackerError {
     PoisonError(#[from] std::sync::PoisonError<core::MatExprResult<core::MatExpr>>),
 }
 
-/// Returns paths to all jpg,jpeg,tif and png files in a single directory (non-recursive)
-pub fn collect_image_files(path: &path::Path) -> Result<Vec<path::PathBuf>, StackerError> {
-    Ok(std::fs::read_dir(path)?
-        .flatten()
-        .filter_map(|f| f.path().is_file().then(|| f.path()))
-        .filter(|p| p.extension().is_some() && p.extension().unwrap().to_str().is_some())
-        .filter(|p| {
-            let extension = p.extension().unwrap().to_str().unwrap().to_uppercase();
-            extension == "JPG" || extension == "JPEG" || extension == "TIF" || extension == "PNG"
-        })
-        .collect())
-}
-
 /// Opens an image file. Returns a (`Mat<f32>`, key-points and descriptors) tuple of the file
 fn orb_detect_and_compute(
-    file: &path::Path,
+    file: &std::path::Path,
 ) -> Result<(Mat, core::Vector<core::KeyPoint>, Mat), StackerError> {
     let mut orb = ORB::create_def()?;
     let img = imgcodecs::imread(file.to_str().unwrap(), imgcodecs::IMREAD_COLOR)?;
@@ -92,30 +80,33 @@ pub struct KeyPointMatchParameters {
 /// All `files` will be aligned and stacked together. The result is returned as a `Mat<f32>`.
 /// All images will be position-matched against the first image,
 /// so the first image should, preferably, be the one with best focus.
-// no_run because the test uses files that might not be present
+// no_run because the test uses files that is not present
 /// ```no_run
-/// use libstacker::{opencv::prelude::*, keypoint_match, collect_image_files, KeyPointMatchParameters, StackerError};
-/// use std::path::PathBuf;
+/// # use libstacker::{prelude::*, opencv::prelude::*};
 /// # fn f() -> Result<(),StackerError> {
 /// let keypoint_match_img:opencv::core::Mat = keypoint_match(
-///     collect_image_files(&PathBuf::from("image_stacking_py/images"))?,
+///     vec!["1.jpg","2.jpg","3.jpg","4.jpg","5.jpg"],
 ///     KeyPointMatchParameters {
 ///         method: opencv::calib3d::RANSAC,
 ///         ransac_reproj_threshold: 5.0,
 ///      })?;
 /// # Ok(())}
 /// ```
-pub fn keypoint_match(
-    files: Vec<path::PathBuf>,
-    params: KeyPointMatchParameters,
-) -> Result<Mat, StackerError> {
-    let (first_file, rest_of_the_files) =
-        files.split_first().ok_or(StackerError::NotEnoughFiles)?;
+pub fn keypoint_match<I, P>(files: I, params: KeyPointMatchParameters) -> Result<Mat, StackerError>
+where
+    I: IntoIterator<Item = P>,
+    P: AsRef<std::path::Path>,
+{
+    let mut iter = files.into_iter();
 
-    let (stacked_img, first_kp, first_des) = orb_detect_and_compute(first_file)?;
+    let first_file = iter.next().ok_or(StackerError::NotEnoughFiles)?;
+
+    let (stacked_img, first_kp, first_des) = orb_detect_and_compute(first_file.as_ref())?;
     let first_kp = UnsafeVectorKeyPointSyncWrapper(first_kp);
     let first_des = UnsafeMatSyncWrapper(first_des);
     let stacked_img: Arc<Mutex<Mat>> = Arc::new(Mutex::new(stacked_img));
+
+    let rest_of_the_files: Vec<PathBuf> = iter.map(|p| p.as_ref().to_path_buf()).collect();
 
     let number_of_files = {
         let result: Result<Vec<()>, StackerError> = rest_of_the_files
@@ -125,7 +116,7 @@ pub fn keypoint_match(
                 move |file| -> Result<(), StackerError> {
                     let first_des = &first_des;
                     let first_kp = &first_kp;
-                    let (img_f, kp, des) = orb_detect_and_compute(file)?;
+                    let (img_f, kp, des) = orb_detect_and_compute(&file)?;
 
                     let matches = {
                         let mut matcher = features2d::BFMatcher::create(core::NORM_HAMMING, true)?;
@@ -145,8 +136,8 @@ pub fn keypoint_match(
                             pts.push(first_kp.0.get(m.query_idx as usize)?.pt());
                         }
                         let mut mat = Mat::from_exact_iter(pts.into_iter())?;
-                        // TODO: what to do about the reshape????? pts.reshape(-1, 1, 2);
-                        mat.reshape_mut(2,0)?; // 2 channels, 0 rows (auto) is this correct?
+                        // TODO: what to do about the reshape????? python: pts.reshape(-1, 1, 2);
+                        mat.reshape_mut(2, 0)?; // 2 channels, 0 rows (auto) is this correct?
                         mat
                     };
 
@@ -156,9 +147,9 @@ pub fn keypoint_match(
                         for m in matches.iter() {
                             pts.push(kp.get(m.train_idx as usize)?.pt());
                         }
-                        let mut mat=Mat::from_exact_iter(pts.into_iter())?;
-                        // TODO: what to do about the reshape????? pts.reshape(-1, 1, 2);
-                        mat.reshape_mut(2,0)?; // 2 channels, 0 rows (auto) is this correct?
+                        let mut mat = Mat::from_exact_iter(pts.into_iter())?;
+                        // TODO: what to do about the reshape????? python: pts.reshape(-1, 1, 2);
+                        mat.reshape_mut(2, 0)?; // 2 channels, 0 rows (auto) is this correct?
                         mat
                     };
                     let h = calib3d::find_homography(
@@ -250,8 +241,8 @@ pub struct EccMatchParameters {
 impl From<EccMatchParameters> for Result<core::TermCriteria, StackerError> {
     /// Converts from a `EccMatchParameters` to TermCriteria
     /// ```
-    /// # use libstacker::{opencv::core::{TermCriteria, TermCriteria_Type},EccMatchParameters, MotionType, StackerError};
-    /// let t:Result<TermCriteria, StackerError> = EccMatchParameters{
+    /// # use libstacker::{prelude::*, opencv::prelude::*, opencv::core::TermCriteria_Type};
+    /// let t:Result<opencv::core::TermCriteria, StackerError> = EccMatchParameters{
     ///     motion_type: MotionType::Euclidean,
     ///     max_count: None,
     ///     epsilon: Some(0.1),
@@ -279,13 +270,12 @@ impl From<EccMatchParameters> for Result<core::TermCriteria, StackerError> {
 /// All `files` will be aligned and stacked together. The result is returned as a `Mat<f32>`.
 /// All images will be position-matched against the first image,
 /// so the first image should, preferably, be the one with best focus.
-// no_run because the test uses files that might not be present
-/// ```no_run
-/// use libstacker::{opencv::prelude::*, ecc_match, collect_image_files, EccMatchParameters, StackerError, MotionType};
-/// use std::path::PathBuf;
+// no_run because the test uses files that is not present
+/// ```rust,no_run
+/// # use libstacker::{prelude::*, opencv::prelude::*};
 /// # fn f() -> Result<(),StackerError> {
 /// let ecc_match_img:opencv::core::Mat = ecc_match(
-///    collect_image_files(&PathBuf::from("image_stacking_py/images"))?,
+///    vec!["1.jpg","2.jpg","3.jpg","4.jpg","5.jpg"],
 ///    EccMatchParameters {
 ///       motion_type: MotionType::Homography,
 ///       max_count: Some(10000),
@@ -294,17 +284,21 @@ impl From<EccMatchParameters> for Result<core::TermCriteria, StackerError> {
 ///    })?;
 /// # Ok(())}
 /// ```
-pub fn ecc_match(
-    files: Vec<path::PathBuf>,
-    params: EccMatchParameters,
-) -> Result<Mat, StackerError> {
+pub fn ecc_match<I, P>(files: I, params: EccMatchParameters) -> Result<Mat, StackerError>
+where
+    I: IntoIterator<Item = P>,
+    P: AsRef<std::path::Path>,
+{
+    let mut iter = files.into_iter();
+    let first_file = iter.next().ok_or(StackerError::NotEnoughFiles)?;
+
     let criteria = Result::<core::TermCriteria, StackerError>::from(params)?;
 
-    let (first_file, rest_of_the_files) =
-        files.split_first().ok_or(StackerError::NotEnoughFiles)?;
-    let (img_grey, stacked_img) = read_grey_f32(first_file)?;
+    let (img_grey, stacked_img) = read_grey_f32(first_file.as_ref())?;
     let first_img = UnsafeMatSyncWrapper(img_grey);
     let stacked_img: Arc<Mutex<Mat>> = Arc::new(Mutex::new(stacked_img));
+
+    let rest_of_the_files: Vec<PathBuf> = iter.map(|p| p.as_ref().to_path_buf()).collect();
 
     let number_of_files = {
         let result: Result<Vec<()>, StackerError> = rest_of_the_files
@@ -313,7 +307,7 @@ pub fn ecc_match(
                 let stacked_img = stacked_img.clone();
                 move |file| -> Result<(), StackerError> {
                     let first_img = &first_img;
-                    let (img_grey, img_f32) = read_grey_f32(file)?;
+                    let (img_grey, img_f32) = read_grey_f32(&file)?;
 
                     // s, M = cv2.findTransformECC(cv2.cvtColor(image,cv2.COLOR_BGR2GRAY), first_image, M, cv2.MOTION_HOMOGRAPHY)
 
@@ -446,49 +440,56 @@ pub fn sharpness_variance_of_laplacian(src_mat: &Mat) -> Result<f64, StackerErro
     Ok(focus_measure * focus_measure)
 }
 
-/// Detect sharpness of an image <https://stackoverflow.com/a/7768918>
-/// OpenCV port of 'TENG' algorithm (Krotkov86)
+/// Detect sharpness of an image using Tenengrad algorithm (Krotkov86)
+/// <https://stackoverflow.com/a/7768918>
+///
+/// # Arguments
+/// * `src_grey_mat` - Input grayscale image (single channel)
+/// * `k_size` - Kernel size for Sobel operator (must be 1, 3, 5, or 7)
+///
+/// # Returns
+/// Sharpness metric (higher values indicate sharper images)
 /// TODO: This function does not, yet, work as intended
-pub fn sharpness_tenengrad(src_mat: &Mat, k_size: i32) -> Result<f64, StackerError> {
+pub fn sharpness_tenengrad(src_grey_mat: &Mat, k_size: i32) -> Result<f64, StackerError> {
+    // Compute gradients using Sobel
     let mut gx = Mat::default();
     let mut gy = Mat::default();
     imgproc::sobel(
-        src_mat,
+        src_grey_mat,
         &mut gx,
         core::CV_64FC1,
-        1,
-        0,
+        1,  // x-order
+        0,  // y-order
         k_size,
-        1.0,
-        0.0,
+        1.0,  // scale
+        0.0,  // delta
         core::BORDER_DEFAULT,
     )?;
     imgproc::sobel(
-        src_mat,
+        src_grey_mat,
         &mut gy,
         core::CV_64FC1,
-        0,
-        1,
+        0,  // x-order
+        1,  // y-order
         k_size,
         1.0,
         0.0,
         core::BORDER_DEFAULT,
     )?;
 
-    let gx = {
-        //let gx_clone = gx.clone();
-        //let gy_clone = gy.clone();
-        // todo: how to do a_mat*a_mat without cloning?
-        // todo: squaring the mat always fails
-        (gx /* *gx_clone */  + gy/* *gy_clone */)
-            .into_result()?
-            .to_mat()?
-    };
+    // Compute squared gradients (gx² and gy²)
+    let mut gx2 = Mat::default();
+    let mut gy2 = Mat::default();
+    core::multiply(&gx, &gx, &mut gx2, 1.0, -1)?;
+    core::multiply(&gy, &gy, &mut gy2, 1.0, -1)?;
 
-    Ok(*core::mean(&gx, &Mat::default())?
-        .0
-        .first()
-        .unwrap_or(&f64::MAX))
+    // Sum the squared gradients (gx² + gy²)
+    let mut sum = Mat::default();
+    core::add(&gx2, &gy2, &mut sum, &core::no_array(), -1)?;
+
+    // Compute mean of the squared gradient magnitudes
+    let mean = core::mean(&sum, &core::no_array())?;
+    Ok(mean[0])
 }
 
 /// Detect sharpness of an image <https://stackoverflow.com/a/7768918>
@@ -515,7 +516,7 @@ pub trait SetMValue {
 impl SetMValue for Mat {
     #[inline]
     /// ```
-    /// use libstacker::{SetMValue,opencv::prelude::MatTraitConst};
+    /// # use libstacker::{prelude::*, opencv::prelude::* ,opencv::prelude::MatTraitConst};
     /// let mut m = unsafe { opencv::core::Mat::new_rows_cols(1, 3, opencv::core::CV_64FC1).unwrap() };
     /// m.set_2d::<f64>(0, 0, -1.0).unwrap();
     /// m.set_2d::<f64>(0, 1, -2.0).unwrap();
@@ -534,4 +535,8 @@ impl SetMValue for Mat {
         *v = value;
         Ok(())
     }
+}
+
+pub mod prelude{
+    pub use super::{keypoint_match, ecc_match, EccMatchParameters, StackerError, MotionType, KeyPointMatchParameters, SetMValue};
 }

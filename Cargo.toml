@@ -3,7 +3,7 @@ authors = ["eadf <lacklustr@protonmail.com>"]
 name = "libstacker"
 license = "MIT OR Apache-2.0"
 version = "0.0.7"
-edition = "2021"
+edition = "2024"
 readme = "README.md"
 keywords = ["opencv", "image_stacking"]
 repository = "https://github.com/eadf/libstacker.rs"
@@ -14,10 +14,10 @@ name = "main"
 path = "examples/main.rs"
 
 [dependencies]
-opencv = { version = "0.85.3" , features = ["features2d"] }
-thiserror = "1.0.50"
-ordered-float = "4.1.1"
-rayon = "1.8"
+opencv = { version = "0.94.3" , features = ["features2d"] }
+thiserror = "2.0.12"
+ordered-float = "5.0.0"
+rayon = "1.10.0"
 
 [features]
 clang-runtime = ["opencv/clang-runtime"]

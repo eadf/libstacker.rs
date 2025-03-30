@@ -1,7 +1,10 @@
+// SPDX-License-Identifier: MIT OR Apache-2.0
+// Copyright (c) 2021,2025 lacklustr@protonmail.com https://github.com/eadf
+
 //! This library contains multi-threaded image stacking functions,
 //! based on OpenCV <https://crates.io/crates/opencv> and Rayon <https://crates.io/crates/rayon>.
 //!
-//! Copyright (c) 2021 Eadf <lacklustr@protonmail.com>.
+//! Copyright (c) 2021, 2025 Eadf <lacklustr@protonmail.com>.
 //! License: MIT/Apache 2.0
 //!
 //! The is a port of code written by Mathias Sundholm.
@@ -12,9 +15,8 @@
 //! <https://learnopencv.com/image-alignment-ecc-in-opencv-c-python>
 
 pub use opencv;
-use opencv::core::Mat;
-use opencv::features2d::ORB;
-use opencv::{calib3d, core, features2d, imgcodecs, imgproc, prelude::*, types};
+use opencv::core::{AlgorithmHint, Point2f, Vector};
+use opencv::{calib3d, core, features2d, features2d::ORB, imgcodecs, imgproc, prelude::*};
 use ordered_float::OrderedFloat;
 use rayon::prelude::*;
 use std::path;
@@ -136,24 +138,28 @@ pub fn keypoint_match(
                         core::Vector::<core::DMatch>::from(v)
                     };
 
-                    //src_pts = np.float32([first_kp[m.queryIdx].pt for m in matches]).reshape(-1, 1, 2)
+                    //python: src_pts = np.float32([first_kp[m.queryIdx].pt for m in matches]).reshape(-1, 1, 2)
                     let src_pts = {
-                        let mut pts = types::VectorOfPoint2f::new();
+                        let mut pts: Vector<Point2f> = Vector::with_capacity(matches.len());
                         for m in matches.iter() {
                             pts.push(first_kp.0.get(m.query_idx as usize)?.pt());
                         }
+                        let mut mat = Mat::from_exact_iter(pts.into_iter())?;
                         // TODO: what to do about the reshape????? pts.reshape(-1, 1, 2);
-                        Mat::from_exact_iter(pts.into_iter())?
+                        mat.reshape_mut(2,0)?; // 2 channels, 0 rows (auto) is this correct?
+                        mat
                     };
 
-                    //dst_pts = np.float32([kp[m.trainIdx].pt for m in matches]).reshape(-1, 1, 2)
+                    //python: dst_pts = np.float32([kp[m.trainIdx].pt for m in matches]).reshape(-1, 1, 2)
                     let dst_pts = {
-                        let mut pts = types::VectorOfPoint2f::new();
+                        let mut pts: Vector<Point2f> = Vector::with_capacity(matches.len());
                         for m in matches.iter() {
                             pts.push(kp.get(m.train_idx as usize)?.pt());
                         }
+                        let mut mat=Mat::from_exact_iter(pts.into_iter())?;
                         // TODO: what to do about the reshape????? pts.reshape(-1, 1, 2);
-                        Mat::from_exact_iter(pts.into_iter())?
+                        mat.reshape_mut(2,0)?; // 2 channels, 0 rows (auto) is this correct?
+                        mat
                     };
                     let h = calib3d::find_homography(
                         &dst_pts,
@@ -209,7 +215,13 @@ fn read_grey_f32(filename: &path::Path) -> Result<(Mat, Mat), StackerError> {
     img_f32 = (img_f32 / 255.0).into_result()?.to_mat()?;
 
     let mut img_grey = Mat::default();
-    imgproc::cvt_color(&img, &mut img_grey, imgproc::COLOR_BGR2GRAY, 0)?;
+    imgproc::cvt_color(
+        &img,
+        &mut img_grey,
+        imgproc::COLOR_BGR2GRAY,
+        0,
+        AlgorithmHint::ALGO_HINT_DEFAULT,
+    )?;
     Ok((img_grey, img_f32))
 }
 

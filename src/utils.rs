@@ -50,6 +50,7 @@ impl SetMValue for Mat {
     #[inline]
     /// ```
     /// # use libstacker::{prelude::*, opencv::prelude::* ,opencv::prelude::MatTraitConst};
+    /// # use crate::libstacker::utils::SetMValue;
     /// let mut m = unsafe { opencv::core::Mat::new_rows_cols(1, 3, opencv::core::CV_64FC1).unwrap() };
     /// m.set_2d::<f64>(0, 0, -1.0).unwrap();
     /// m.set_2d::<f64>(0, 1, -2.0).unwrap();
@@ -111,11 +112,13 @@ impl From<opencv::Error> for StackerError {
 /// ```no_run
 /// # use libstacker::{utils::imread, prelude::*, opencv::prelude::*, opencv::imgcodecs };
 /// # use std::path::Path;
+/// # fn a() -> Result<(),StackerError> {
 /// let img = imread("image.jpg", imgcodecs::IMREAD_GRAYSCALE)?;
 /// match imread(Path::new("image.png"), imgcodecs::IMREAD_COLOR) {
-///     Ok(mat) => /* process image */,
-///     Err(_) => /* handle opencv error */,
+///     Ok(mat) => /* process image */(),
+///     Err(_) => /* handle opencv error */(),
 /// }
+/// # Ok(()) }
 /// ```
 #[inline(always)]
 pub fn imread<P: AsRef<std::path::Path>>(path: P, flags: i32) -> Result<Mat, StackerError> {

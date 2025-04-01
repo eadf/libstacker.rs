@@ -39,57 +39,56 @@ jobs:
             libtbb-dev \
             clang libclang-dev
 
-      # Clone OpenCV repositories before checking cache
+      # Clone OpenCV repositories with error handling
       - name: Clone OpenCV repositories
         run: |
+          set -e  # Exit immediately on error
           OPENCV_VERSION=4.11.0
           git clone --depth 1 --branch $OPENCV_VERSION https://github.com/opencv/opencv.git
           git clone --depth 1 --branch $OPENCV_VERSION https://github.com/opencv/opencv_contrib.git
           mkdir -p opencv/build
+          ls -l opencv/CMakeLists.txt
 
-      # Cache OpenCV build
+      # Create opencv_install directory (even if empty)
+      - name: Prepare OpenCV install directory
+        run: mkdir -p "${{ github.workspace }}/opencv_install"
+
+      # Cache OpenCV build (now using workspace paths)
       - name: Cache OpenCV build
         id: opencv-cache
         uses: actions/cache@v3
         with:
           path: |
             opencv/build
-            /usr/local/include/opencv4
-            /usr/local/lib/libopencv_*
-            /usr/local/lib/pkgconfig/opencv*
+            ${{ github.workspace }}/opencv_install
           key: opencv-${{ runner.os }}-${{ hashFiles('opencv/CMakeLists.txt') }}-4.11.0
 
-      # Only build OpenCV if cache miss
+      # Build OpenCV if cache miss
       - name: Build OpenCV from source
         if: steps.opencv-cache.outputs.cache-hit != 'true'
         run: |
-          cd opencv/build
+          set -e  # Exit immediately on error
+          mkdir -p "${{ github.workspace }}/opencv_install"
+          cd "${{ github.workspace }}/opencv/build"
           cmake \
             -DCMAKE_BUILD_TYPE=RELEASE \
-            -DCMAKE_INSTALL_PREFIX=/usr/local \
-            -DOPENCV_EXTRA_MODULES_PATH=../../opencv_contrib/modules \
+            -DCMAKE_INSTALL_PREFIX="${{ github.workspace }}/opencv_install" \
+            -DOPENCV_EXTRA_MODULES_PATH="${{ github.workspace }}/opencv_contrib/modules" \
             -DBUILD_opencv_world=ON \
             -DBUILD_TESTS=OFF \
-            -DBUILD_EXAMPLES=OFF ..
+            -DBUILD_EXAMPLES=OFF \
+            "${{ github.workspace }}/opencv"
           make -j$(nproc)
-          sudo make install
-          sudo ldconfig
+          make install
 
-      # Install from cache if cache hit
-      - name: Install OpenCV from cache
-        if: steps.opencv-cache.outputs.cache-hit == 'true'
+      - name: Set OpenCV env vars
         run: |
-          sudo cp -r /usr/local/include/opencv4 /usr/local/include/ || true
-          sudo cp -r /usr/local/lib/libopencv_* /usr/local/lib/ || true
-          sudo cp -r /usr/local/lib/pkgconfig/opencv* /usr/local/lib/pkgconfig/ || true
-          sudo ldconfig
-
-      - name: Set OpenCV env vars (required by opencv crate)
-        run: |
-          echo "PKG_CONFIG_PATH=/usr/local/lib/pkgconfig" >> $GITHUB_ENV
-          echo "OPENCV_INCLUDE_PATHS=/usr/local/include/opencv4" >> $GITHUB_ENV
+          echo "PKG_CONFIG_PATH=${{ github.workspace }}/opencv_install/lib/pkgconfig" >> $GITHUB_ENV
+          echo "OPENCV_INCLUDE_PATHS=${{ github.workspace }}/opencv_install/include/opencv4" >> $GITHUB_ENV
           echo "OPENCV_LINK_LIBS=opencv_world" >> $GITHUB_ENV
-          echo "OPENCV_LINK_PATHS=/usr/local/lib" >> $GITHUB_ENV
+          echo "OPENCV_LINK_PATHS=${{ github.workspace }}/opencv_install/lib" >> $GITHUB_ENV
+          # Add LD_LIBRARY_PATH for runtime linking
+          echo "LD_LIBRARY_PATH=${{ github.workspace }}/opencv_install/lib:$LD_LIBRARY_PATH" >> $GITHUB_ENV
 
       - name: Clippy
         run: cargo clippy  --all --all-targets --features "clang-runtime"

@@ -14,54 +14,44 @@
 //! Read more about image alignment with OpenCV here:
 //! <https://learnopencv.com/image-alignment-ecc-in-opencv-c-python>
 
+pub mod utils;
+
+use backtrace::Backtrace as Backtrace2;
 pub use opencv;
-use opencv::core::{AlgorithmHint, Point2f, Vector};
-use opencv::{calib3d, core, features2d, features2d::ORB, imgcodecs, imgproc, prelude::*};
+use opencv::core::{Point2f, Vector};
+use opencv::{calib3d, core, features2d, imgcodecs, imgproc, prelude::*};
 use ordered_float::OrderedFloat;
 use rayon::prelude::*;
-use std::path;
 use std::path::PathBuf;
-use std::sync::{Arc, Mutex};
 use thiserror::Error;
-
-/// A q&d hack allowing `opencv::Mat` objects to be `Sync`.
-/// Only use this on immutable `Mat` objects.
-struct UnsafeMatSyncWrapper(Mat);
-unsafe impl Sync for UnsafeMatSyncWrapper {}
-
-/// A q&d hack allowing `opencv::Vector<KeyPoints>` objects to be `Sync`.
-/// Only use this on immutable `Vector<KeyPoints>` objects.
-struct UnsafeVectorKeyPointSyncWrapper(core::Vector<core::KeyPoint>);
-unsafe impl Sync for UnsafeVectorKeyPointSyncWrapper {}
+use utils::{MatExt, SetMValue};
 
 #[derive(Error, Debug)]
 pub enum StackerError {
+    //#[error(transparent)]
+    //CvError(#[from] opencv::Error),
+    #[error("OpenCV error: {source}")]
+    OpenCvError {
+        source: opencv::Error,
+        backtrace2: Backtrace2,
+    },
     #[error("Something wrong with Arc/Mutex handling")]
     MutexError,
     #[error("Not enough files")]
     NotEnoughFiles,
-    #[error(transparent)]
-    CvError(#[from] opencv::Error),
+    #[error("Not implemented")]
+    NotImplemented,
+
     #[error(transparent)]
     IoError(#[from] std::io::Error),
     #[error(transparent)]
     PoisonError(#[from] std::sync::PoisonError<core::MatExprResult<core::MatExpr>>),
-}
-
-/// Opens an image file. Returns a (`Mat<f32>`, key-points and descriptors) tuple of the file
-fn orb_detect_and_compute(
-    file: &std::path::Path,
-) -> Result<(Mat, core::Vector<core::KeyPoint>, Mat), StackerError> {
-    let mut orb = ORB::create_def()?;
-    let img = imgcodecs::imread(file.to_str().unwrap(), imgcodecs::IMREAD_COLOR)?;
-    let mut img_f32 = Mat::default();
-    img.convert_to(&mut img_f32, opencv::core::CV_32F, 1.0, 0.0)?;
-    img_f32 = (img_f32 / 255.0).into_result()?.to_mat()?;
-
-    let mut kp = core::Vector::<core::KeyPoint>::new();
-    let mut des = Mat::default();
-    orb.detect_and_compute(&img, &Mat::default(), &mut kp, &mut des, false)?;
-    Ok((img_f32, kp, des))
+    #[error("Invalid path encoding {0}")]
+    InvalidPathEncoding(PathBuf),
+    #[error("Invalid parameter(s) {0}")]
+    InvalidParams(String),
+    #[error("Internal error {0}")]
+    ProcessingError(String),
 }
 
 #[derive(Debug)]
@@ -80,7 +70,6 @@ pub struct KeyPointMatchParameters {
 /// All `files` will be aligned and stacked together. The result is returned as a `Mat<f32>`.
 /// All images will be position-matched against the first image,
 /// so the first image should, preferably, be the one with best focus.
-// no_run because the test uses files that is not present
 /// ```no_run
 /// # use libstacker::{prelude::*, opencv::prelude::*};
 /// # fn f() -> Result<(),StackerError> {
@@ -89,131 +78,384 @@ pub struct KeyPointMatchParameters {
 ///     KeyPointMatchParameters {
 ///         method: opencv::calib3d::RANSAC,
 ///         ransac_reproj_threshold: 5.0,
-///      })?;
+///      },
+///      None)?;
 /// # Ok(())}
 /// ```
-pub fn keypoint_match<I, P>(files: I, params: KeyPointMatchParameters) -> Result<Mat, StackerError>
+pub fn keypoint_match<I, P>(
+    files: I,
+    params: KeyPointMatchParameters,
+    scale_down: Option<f32>,
+) -> Result<Mat, StackerError>
 where
     I: IntoIterator<Item = P>,
     P: AsRef<std::path::Path>,
 {
-    let mut iter = files.into_iter();
+    let files = files.into_iter().map(|p| p.as_ref().to_path_buf());
+    if let Some(scale_down) = scale_down {
+        keypoint_match_scale_down(files, params, scale_down)
+    } else {
+        keypoint_match_no_scale(files, params)
+    }
+    .map_err(|e| match e {
+        StackerError::OpenCvError {
+            source: _,
+            backtrace2: ref b,
+        } => {
+            println!("{:?}", b.clone());
+            e
+        }
+        _ => e,
+    })
+}
 
-    let first_file = iter.next().ok_or(StackerError::NotEnoughFiles)?;
+fn keypoint_match_no_scale<I>(
+    files: I,
+    params: KeyPointMatchParameters,
+) -> Result<Mat, StackerError>
+where
+    I: IntoIterator<Item = PathBuf>,
+{
+    let files_vec: Vec<PathBuf> = files.into_iter().collect();
 
-    let (stacked_img, first_kp, first_des) = orb_detect_and_compute(first_file.as_ref())?;
-    let first_kp = UnsafeVectorKeyPointSyncWrapper(first_kp);
-    let first_des = UnsafeMatSyncWrapper(first_des);
-    let stacked_img: Arc<Mutex<Mat>> = Arc::new(Mutex::new(stacked_img));
+    if files_vec.is_empty() {
+        return Err(StackerError::NotEnoughFiles);
+    }
 
-    let rest_of_the_files: Vec<PathBuf> = iter.map(|p| p.as_ref().to_path_buf()).collect();
+    // Process the first file to get reference keypoints and descriptors
+    let first_img = utils::imread(&files_vec[0], imgcodecs::IMREAD_COLOR)?;
+    let first_img_f32_wr =
+        utils::UnsafeMatSyncWrapper(first_img.convert(opencv::core::CV_32F, 1.0 / 255.0, 0.0)?);
 
-    let number_of_files = {
-        let result: Result<Vec<()>, StackerError> = rest_of_the_files
+    // Get the image size from the first image for later use
+    let img_size = first_img.size()?;
+
+    // Get keypoints and descriptors
+    let (first_kp_wr, first_des_wr) = {
+        let (kp, des) = utils::orb_detect_and_compute(&first_img)?;
+        (
+            utils::UnsafeVectorKeyPointSyncWrapper(kp),
+            utils::UnsafeMatSyncWrapper(des),
+        )
+    };
+
+    // we do not need first_img anymore
+    drop(first_img);
+
+    // Combined map-reduce step: Process each image and reduce on the fly
+    let result = {
+        // Create a reference to our wrappers that we can move into the closure
+        let first_kp_wrmv = &first_kp_wr;
+        let first_des_wrmv = &first_des_wr;
+        let first_img_f32_wrmv = &first_img_f32_wr;
+        let files_vec_mw = &files_vec;
+
+        (0..files_vec.len())
             .into_par_iter()
-            .map({
-                let stacked_img = stacked_img.clone();
-                move |file| -> Result<(), StackerError> {
-                    let first_des = &first_des;
-                    let first_kp = &first_kp;
-                    let (img_f, kp, des) = orb_detect_and_compute(&file)?;
+            //.into_iter()
+            .try_fold(
+                || None, // Initial accumulator for each thread
+                move |acc: Option<utils::UnsafeMatSyncWrapper>, index| {
+                    let warped_image = if index == 0 {
+                        // For the first image, just use the already processed image
+                        first_img_f32_wrmv.0.clone()
+                    } else {
+                        // Process non-first images
 
-                    let matches = {
-                        let mut matcher = features2d::BFMatcher::create(core::NORM_HAMMING, true)?;
-                        matcher.add(&des)?;
+                        let (img_grey, img_f32) = utils::read_grey_f32(&files_vec_mw[index])?;
 
-                        let mut matches = core::Vector::<core::DMatch>::new();
-                        matcher.match_(&first_des.0, &mut matches, &Mat::default())?;
-                        let mut v = matches.to_vec();
-                        v.sort_by(|a, b| OrderedFloat(a.distance).cmp(&OrderedFloat(b.distance)));
-                        core::Vector::<core::DMatch>::from(v)
-                    };
+                        //python: src_pts = np.float32([first_kp[m.queryIdx].pt for m in matches]).reshape(-1, 1, 2)
 
-                    //python: src_pts = np.float32([first_kp[m.queryIdx].pt for m in matches]).reshape(-1, 1, 2)
-                    let src_pts = {
-                        let mut pts: Vector<Point2f> = Vector::with_capacity(matches.len());
-                        for m in matches.iter() {
-                            pts.push(first_kp.0.get(m.query_idx as usize)?.pt());
-                        }
-                        let mut mat = Mat::from_exact_iter(pts.into_iter())?;
-                        // TODO: what to do about the reshape????? python: pts.reshape(-1, 1, 2);
-                        mat.reshape_mut(2, 0)?; // 2 channels, 0 rows (auto) is this correct?
-                        mat
+                        // Detect keypoints and compute descriptors
+                        let (kp, des) = utils::orb_detect_and_compute(&img_grey)?;
+
+                        // Match keypoints
+                        let matches = {
+                            let mut matcher =
+                                features2d::BFMatcher::create(core::NORM_HAMMING, true)?;
+                            matcher.add(&des)?;
+
+                            let mut matches = core::Vector::<core::DMatch>::new();
+                            matcher.match_(&first_des_wrmv.0, &mut matches, &Mat::default())?;
+                            let mut v = matches.to_vec();
+                            v.sort_by(|a, b| {
+                                OrderedFloat(a.distance).cmp(&OrderedFloat(b.distance))
+                            });
+                            core::Vector::<core::DMatch>::from(v)
+                        };
+
+                        // Calculate source points
+                        let src_pts = {
+                            let mut pts: Vector<Point2f> = Vector::with_capacity(matches.len());
+                            for m in matches.iter() {
+                                pts.push(first_kp_wrmv.0.get(m.query_idx as usize)?.pt());
+                            }
+                            let mut mat = Mat::from_exact_iter(pts.into_iter())?;
+                            mat.reshape_mut(2, 0)?;
+                            mat
+                        };
+
+                        // Calculate destination points
+                        let dst_pts = {
+                            let mut pts: Vector<Point2f> = Vector::with_capacity(matches.len());
+                            for m in matches.iter() {
+                                pts.push(kp.get(m.train_idx as usize)?.pt());
+                            }
+                            let mut mat = Mat::from_exact_iter(pts.into_iter())?;
+                            mat.reshape_mut(2, 0)?;
+                            mat
+                        };
+
+                        // Find homography matrix
+                        let h = calib3d::find_homography(
+                            &dst_pts,
+                            &src_pts,
+                            &mut Mat::default(),
+                            params.method,
+                            params.ransac_reproj_threshold,
+                        )?;
+
+                        // Warp image
+                        let mut warped_image = Mat::default();
+                        imgproc::warp_perspective(
+                            &img_f32,
+                            &mut warped_image,
+                            &h,
+                            img_size,
+                            imgproc::INTER_LINEAR,
+                            core::BORDER_CONSTANT,
+                            core::Scalar::default(),
+                        )?;
+
+                        warped_image
                     };
 
                     //python: dst_pts = np.float32([kp[m.trainIdx].pt for m in matches]).reshape(-1, 1, 2)
-                    let dst_pts = {
-                        let mut pts: Vector<Point2f> = Vector::with_capacity(matches.len());
-                        for m in matches.iter() {
-                            pts.push(kp.get(m.train_idx as usize)?.pt());
-                        }
-                        let mut mat = Mat::from_exact_iter(pts.into_iter())?;
-                        // TODO: what to do about the reshape????? python: pts.reshape(-1, 1, 2);
-                        mat.reshape_mut(2, 0)?; // 2 channels, 0 rows (auto) is this correct?
-                        mat
-                    };
-                    let h = calib3d::find_homography(
-                        &dst_pts,
-                        &src_pts,
-                        &mut Mat::default(),
-                        params.method,
-                        params.ransac_reproj_threshold,
-                    )?;
-
-                    let mut warped_image = Mat::default();
-                    imgproc::warp_perspective(
-                        &img_f,
-                        &mut warped_image,
-                        &h,
-                        img_f.size()?,
-                        imgproc::INTER_LINEAR,
-                        core::BORDER_CONSTANT,
-                        core::Scalar::default(),
-                    )?;
-
-                    if let Ok(mut stacked_img) = stacked_img.lock() {
-                        // For some reason a mutex guard won't allow (*a + &b)
-                        let taken_stacked_img = std::mem::take(&mut *stacked_img);
-                        *stacked_img = (taken_stacked_img + &warped_image)
-                            .into_result()?
-                            .to_mat()?;
-                        Ok(())
+                    // Add to the accumulator (if accumulator is empty, just use the processed image)
+                    let result = if let Some(acc) = acc {
+                        let rv = utils::UnsafeMatSyncWrapper(
+                            (&acc.0 + &warped_image).into_result()?.to_mat()?,
+                        );
+                        Some(rv)
                     } else {
-                        Err(StackerError::MutexError)
+                        Some(utils::UnsafeMatSyncWrapper(warped_image))
+                    };
+
+                    Ok::<Option<utils::UnsafeMatSyncWrapper>, StackerError>(result)
+                },
+            )
+            .try_reduce(
+                || None,
+                |acc1, acc2| match (acc1, acc2) {
+                    (Some(acc1), None) => Ok(Some(acc1)),
+                    (None, Some(acc2)) => Ok(Some(acc2)),
+                    (Some(acc1), Some(acc2)) => {
+                        // Combine the two accumulators
+                        let combined = utils::UnsafeMatSyncWrapper(
+                            (&acc1.0 + &acc2.0).into_result()?.to_mat()?,
+                        );
+                        Ok(Some(combined))
                     }
-                }
-            })
-            .collect();
-        result?.len() + 1
+                    _ => unreachable!(),
+                },
+            )
+    }?;
+
+    // Final normalization
+    let final_result = if let Some(result) = result {
+        (result.0 / files_vec.len() as f64)
+            .into_result()?
+            .to_mat()?
+    } else {
+        return Err(StackerError::ProcessingError(
+            "Empty result after reduction".to_string(),
+        ));
     };
 
-    if let Ok(stacked_img) = Arc::try_unwrap(stacked_img) {
-        if let Ok(mut stacked_img) = stacked_img.into_inner() {
-            stacked_img = (stacked_img / number_of_files as f64)
-                .into_result()?
-                .to_mat()?;
-            return Ok(stacked_img);
-        }
-    }
-    Err(StackerError::MutexError)
+    Ok(final_result)
 }
 
-/// Read a image file and returns a (`Mat<COLOR_BGR2GRAY>`,`Mat<CV_32F>`) tuple
-fn read_grey_f32(filename: &path::Path) -> Result<(Mat, Mat), StackerError> {
-    let img = imgcodecs::imread(filename.to_str().unwrap(), imgcodecs::IMREAD_COLOR)?;
-    let mut img_f32 = Mat::default();
-    img.convert_to(&mut img_f32, opencv::core::CV_32F, 1.0, 0.0)?;
-    img_f32 = (img_f32 / 255.0).into_result()?.to_mat()?;
+fn keypoint_match_scale_down<I>(
+    files: I,
+    params: KeyPointMatchParameters,
+    scale_down_to: f32,
+) -> Result<Mat, StackerError>
+where
+    I: IntoIterator<Item = PathBuf>,
+{
+    let files_vec: Vec<PathBuf> = files.into_iter().collect();
+    if files_vec.is_empty() {
+        return Err(StackerError::NotEnoughFiles);
+    }
 
-    let mut img_grey = Mat::default();
-    imgproc::cvt_color(
-        &img,
-        &mut img_grey,
-        imgproc::COLOR_BGR2GRAY,
-        0,
-        AlgorithmHint::ALGO_HINT_DEFAULT,
-    )?;
-    Ok((img_grey, img_f32))
+    // Process the first file to get reference keypoints and descriptors
+    let first_file = &files_vec[0];
+    let first_img = utils::imread(first_file, imgcodecs::IMREAD_COLOR)?;
+    let first_img_f32_wr =
+        utils::UnsafeMatSyncWrapper(first_img.convert(opencv::core::CV_32F, 1.0 / 255.0, 0.0)?);
+
+    // Get the image size from the first image for later use
+    let img_size = first_img.size()?;
+
+    // Number of files for final normalization
+    let number_of_files = files_vec.len();
+
+    // Get keypoints and descriptors
+    let (first_kp_small_wr, first_des_small_wr) = {
+        // Scale down the first image
+        let img_small = utils::scale_image(&first_img, scale_down_to)?;
+
+        let (kp, des) = utils::orb_detect_and_compute(&img_small)?;
+        (
+            utils::UnsafeVectorKeyPointSyncWrapper(kp),
+            utils::UnsafeMatSyncWrapper(des),
+        )
+    };
+
+    // we do not need first_img anymore
+    drop(first_img);
+
+    // Combined map-reduce step: Process each image and reduce on the fly
+    let result = {
+        // Create a reference to our wrappers that we can move into the closure
+        let first_kp_small_wrmv = &first_kp_small_wr;
+        let first_des_small_wrmv = &first_des_small_wr;
+        let first_img_f32_small_wrmv = &first_img_f32_wr;
+
+        (0..files_vec.len())
+            .into_par_iter()
+            //.into_iter()
+            .try_fold(
+                || None, // Initial accumulator for each thread
+                move |acc: Option<utils::UnsafeMatSyncWrapper>, index| {
+                    let warped_img = if index == 0 {
+                        // For the first image, just use the already processed image
+                        first_img_f32_small_wrmv.0.clone()
+                    } else {
+                        // Process non-first images
+
+                        let first_des_small = first_des_small_wrmv;
+                        let first_kp_small = first_kp_small_wrmv;
+
+                        // Load and scale down the image for feature detection
+                        let (img_small_grey, img_original) = {
+                            let (img_grey, img_original) = utils::read_grey_f32(&files_vec[index])?;
+                            let img_small_grey = utils::scale_image(&img_grey, scale_down_to)?;
+                            (img_small_grey, img_original)
+                        };
+
+                        // Detect features on the scaled-down image
+                        let (kp_small, des_small) = utils::orb_detect_and_compute(&img_small_grey)?;
+
+                        // Match features
+                        let matches = {
+                            let mut matcher =
+                                features2d::BFMatcher::create(core::NORM_HAMMING, true)?;
+                            matcher.add(&des_small)?;
+
+                            let mut matches = core::Vector::<core::DMatch>::new();
+
+                            matcher.match_(&first_des_small.0, &mut matches, &Mat::default())?;
+                            let mut v = matches.to_vec();
+                            v.sort_by(|a, b| {
+                                OrderedFloat(a.distance).cmp(&OrderedFloat(b.distance))
+                            });
+                            core::Vector::<core::DMatch>::from(v)
+                        };
+
+                        // Get corresponding points (on small images)
+                        let src_pts = {
+                            let mut pts: Vector<Point2f> = Vector::with_capacity(matches.len());
+                            for m in matches.iter() {
+                                pts.push(first_kp_small.0.get(m.query_idx as usize)?.pt());
+                            }
+                            let mut mat = Mat::from_exact_iter(pts.into_iter())?;
+                            mat.reshape_mut(2, 0)?;
+                            mat
+                        };
+
+                        let dst_pts = {
+                            let mut pts: Vector<Point2f> = Vector::with_capacity(matches.len());
+                            for m in matches.iter() {
+                                pts.push(kp_small.get(m.train_idx as usize)?.pt());
+                            }
+                            let mut mat = Mat::from_exact_iter(pts.into_iter())?;
+                            mat.reshape_mut(2, 0)?;
+                            mat
+                        };
+
+                        // Calculate homography on small images
+                        let h_small = calib3d::find_homography(
+                            &dst_pts,
+                            &src_pts,
+                            &mut Mat::default(),
+                            params.method,
+                            params.ransac_reproj_threshold,
+                        )?;
+
+                        // Scale homography matrix to apply to original-sized images
+                        let h = utils::adjust_homography_for_scale_f64(
+                            &h_small,
+                            &img_small_grey,
+                            &img_original,
+                        )?;
+
+                        // Warp the original full-sized image
+                        let mut warped_image = Mat::default();
+
+                        imgproc::warp_perspective(
+                            &img_original,
+                            &mut warped_image,
+                            &h,
+                            img_size,
+                            imgproc::INTER_LINEAR,
+                            core::BORDER_CONSTANT,
+                            core::Scalar::default(),
+                        )?;
+
+                        warped_image
+                    };
+                    let result = if let Some(acc) = acc {
+                        let rv = utils::UnsafeMatSyncWrapper(
+                            (&acc.0 + &warped_img).into_result()?.to_mat()?,
+                        );
+                        Some(rv)
+                    } else {
+                        Some(utils::UnsafeMatSyncWrapper(warped_img))
+                    };
+
+                    Ok::<Option<utils::UnsafeMatSyncWrapper>, StackerError>(result)
+                },
+            )
+            .try_reduce(
+                || None,
+                |acc1, acc2| match (acc1, acc2) {
+                    (Some(acc1), None) => Ok(Some(acc1)),
+                    (None, Some(acc2)) => Ok(Some(acc2)),
+                    (Some(acc1), Some(acc2)) => {
+                        // Combine the two accumulators
+                        let combined = utils::UnsafeMatSyncWrapper(
+                            (&acc1.0 + &acc2.0).into_result()?.to_mat()?,
+                        );
+                        Ok(Some(combined))
+                    }
+                    _ => unreachable!(),
+                },
+            )
+    }?;
+
+    // Final normalization
+    let final_result = if let Some(result) = result {
+        (result.0 / number_of_files as f64)
+            .into_result()?
+            .to_mat()?
+    } else {
+        return Err(StackerError::ProcessingError(
+            "Empty result after reduction".to_string(),
+        ));
+    };
+
+    Ok(final_result)
 }
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
@@ -238,33 +480,6 @@ pub struct EccMatchParameters {
     // todo: impl Default
 }
 
-impl From<EccMatchParameters> for Result<core::TermCriteria, StackerError> {
-    /// Converts from a `EccMatchParameters` to TermCriteria
-    /// ```
-    /// # use libstacker::{prelude::*, opencv::prelude::*, opencv::core::TermCriteria_Type};
-    /// let t:Result<opencv::core::TermCriteria, StackerError> = EccMatchParameters{
-    ///     motion_type: MotionType::Euclidean,
-    ///     max_count: None,
-    ///     epsilon: Some(0.1),
-    ///     gauss_filt_size:3}.into();
-    /// let t = t.unwrap();
-    /// assert_eq!(t.epsilon, 0.1);
-    /// assert_eq!(t.typ, TermCriteria_Type::EPS as i32);
-    /// ```
-    fn from(r: EccMatchParameters) -> Result<core::TermCriteria, StackerError> {
-        let mut rv = core::TermCriteria::default()?;
-        if let Some(max_count) = r.max_count {
-            rv.typ |= core::TermCriteria_Type::COUNT as i32;
-            rv.max_count = max_count;
-        }
-        if let Some(epsilon) = r.epsilon {
-            rv.typ |= core::TermCriteria_Type::EPS as i32;
-            rv.epsilon = epsilon;
-        }
-        Ok(rv)
-    }
-}
-
 /// Stacks images using the OpenCV ECC alignment method.
 /// <https://learnopencv.com/image-alignment-ecc-in-opencv-c-python>
 /// All `files` will be aligned and stacked together. The result is returned as a `Mat<f32>`.
@@ -281,101 +496,322 @@ impl From<EccMatchParameters> for Result<core::TermCriteria, StackerError> {
 ///       max_count: Some(10000),
 ///       epsilon: Some(1e-10),
 ///       gauss_filt_size: 5,
-///    })?;
+///    }, None)?;
 /// # Ok(())}
 /// ```
-pub fn ecc_match<I, P>(files: I, params: EccMatchParameters) -> Result<Mat, StackerError>
+pub fn ecc_match<I, P>(
+    files: I,
+    params: EccMatchParameters,
+    scale_down: Option<f32>,
+) -> Result<Mat, StackerError>
 where
     I: IntoIterator<Item = P>,
     P: AsRef<std::path::Path>,
 {
-    let mut iter = files.into_iter();
-    let first_file = iter.next().ok_or(StackerError::NotEnoughFiles)?;
+    let files = files.into_iter().map(|p| p.as_ref().to_path_buf());
+    if let Some(scale_down) = scale_down {
+        ecc_match_scaling_down(files, params, scale_down)
+    } else {
+        ecc_match_no_scaling(files, params)
+    }
+    .map_err(|e| match e {
+        StackerError::OpenCvError {
+            source: _,
+            backtrace2: ref b,
+        } => {
+            println!("{:?}", b.clone());
+            e
+        }
+        _ => e,
+    })
+}
+
+pub fn ecc_match_scaling_down<I>(
+    files: I,
+    params: EccMatchParameters,
+    scale_down_to: f32,
+) -> Result<Mat, StackerError>
+where
+    I: IntoIterator<Item = PathBuf>,
+{
+    let files_vec: Vec<PathBuf> = files.into_iter().collect();
+
+    if files_vec.is_empty() {
+        return Err(StackerError::NotEnoughFiles);
+    }
 
     let criteria = Result::<core::TermCriteria, StackerError>::from(params)?;
 
-    let (img_grey, stacked_img) = read_grey_f32(first_file.as_ref())?;
-    let first_img = UnsafeMatSyncWrapper(img_grey);
-    let stacked_img: Arc<Mutex<Mat>> = Arc::new(Mutex::new(stacked_img));
+    let (first_img_grey_wr, first_img_f32_wr) = {
+        let (img_grey, first_img_f32) = utils::read_grey_f32(&files_vec[0])?;
+        (
+            utils::UnsafeMatSyncWrapper(img_grey),
+            utils::UnsafeMatSyncWrapper(first_img_f32),
+        )
+    };
 
-    let rest_of_the_files: Vec<PathBuf> = iter.map(|p| p.as_ref().to_path_buf()).collect();
+    // Load first image in color and grayscale
+    let full_size = first_img_f32_wr.0.size()?;
 
-    let number_of_files = {
-        let result: Result<Vec<()>, StackerError> = rest_of_the_files
+    // Scale down the first image for ECC
+    let first_img_grey_small_wr =
+        utils::UnsafeMatSyncWrapper(utils::scale_image(&first_img_grey_wr.0, scale_down_to)?);
+    let small_size = first_img_grey_small_wr.0.size()?;
+
+    // Combined map-reduce step: Process each image and reduce on the fly
+    let result = {
+        let first_img_f32_wrmv = &first_img_f32_wr;
+        let files_vec_mv = &files_vec;
+
+        (0..files_vec.len())
             .into_par_iter()
-            .map({
-                let stacked_img = stacked_img.clone();
-                move |file| -> Result<(), StackerError> {
-                    let first_img = &first_img;
-                    let (img_grey, img_f32) = read_grey_f32(&file)?;
-
-                    // s, M = cv2.findTransformECC(cv2.cvtColor(image,cv2.COLOR_BGR2GRAY), first_image, M, cv2.MOTION_HOMOGRAPHY)
-
-                    let mut warp_matrix = if params.motion_type != MotionType::Homography {
-                        Mat::eye(2, 3, opencv::core::CV_32F)?.to_mat()?
+            .try_fold(
+                || None, // Initial accumulator for each thread
+                move |acc: Option<utils::UnsafeMatSyncWrapper>, index| {
+                    let warped_image = if index == 0 {
+                        // For the first image, just use the already processed image
+                        first_img_f32_wrmv.0.clone()
                     } else {
-                        Mat::eye(3, 3, opencv::core::CV_32F)?.to_mat()?
+                        // Load image in both color and grayscale
+                        let (img_grey_original, img_f32) =
+                            utils::read_grey_f32(&files_vec_mv[index])?;
+                        let first_img_grey_small = &first_img_grey_small_wr;
+
+                        // Scale down for ECC matching
+                        let img_small = utils::scale_image(&img_f32, scale_down_to)?;
+                        let img_grey_small = utils::scale_image(&img_grey_original, scale_down_to)?;
+
+                        // Initialize warp matrix based on motion type
+                        let mut warp_matrix_small = if params.motion_type != MotionType::Homography
+                        {
+                            Mat::eye(2, 3, opencv::core::CV_32F)?.to_mat()?
+                        } else {
+                            Mat::eye(3, 3, opencv::core::CV_32F)?.to_mat()?
+                        };
+
+                        // Find transformation on small images
+                        let _ = opencv::video::find_transform_ecc(
+                            &img_grey_small,
+                            &first_img_grey_small.0,
+                            &mut warp_matrix_small,
+                            params.motion_type as i32,
+                            criteria,
+                            &Mat::default(),
+                            params.gauss_filt_size,
+                        )?;
+
+                        let warp_matrix = if params.motion_type != MotionType::Homography {
+                            // For affine transformations, adjust the translation part of the matrix
+                            let mut full_warp = warp_matrix_small.clone();
+
+                            // Scale the translation components (third column)
+                            let tx = full_warp.at_2d_mut::<f32>(0, 2)?;
+                            *tx *= full_size.width as f32 / small_size.width as f32;
+                            let ty = full_warp.at_2d_mut::<f32>(1, 2)?;
+                            *ty *= full_size.height as f32 / small_size.height as f32;
+
+                            full_warp
+                        } else {
+                            utils::adjust_homography_for_scale_f32(
+                                &warp_matrix_small,
+                                &img_small,
+                                &img_f32,
+                            )?
+                        };
+
+                        let mut warped_image = Mat::default();
+
+                        if params.motion_type != MotionType::Homography {
+                            // Use warp_affine() for Translation, Euclidean and Affine
+                            imgproc::warp_affine(
+                                &img_f32,
+                                &mut warped_image,
+                                &warp_matrix,
+                                full_size,
+                                imgproc::INTER_LINEAR,
+                                core::BORDER_CONSTANT,
+                                core::Scalar::default(),
+                            )?;
+                        } else {
+                            // Use warp_perspective() for Homography
+                            imgproc::warp_perspective(
+                                &img_f32,
+                                &mut warped_image,
+                                &warp_matrix,
+                                full_size,
+                                imgproc::INTER_LINEAR,
+                                core::BORDER_CONSTANT,
+                                core::Scalar::default(),
+                            )?;
+                        }
+                        warped_image
                     };
 
-                    let _ = opencv::video::find_transform_ecc(
-                        &img_grey,
-                        &first_img.0,
-                        &mut warp_matrix,
-                        params.motion_type as i32,
-                        criteria,
-                        &Mat::default(),
-                        params.gauss_filt_size,
-                    )?;
-                    let mut warped_image = Mat::default();
+                    let result = if let Some(acc) = acc {
+                        let rv = utils::UnsafeMatSyncWrapper(
+                            (&acc.0 + &warped_image).into_result()?.to_mat()?,
+                        );
+                        Some(rv)
+                    } else {
+                        Some(utils::UnsafeMatSyncWrapper(warped_image))
+                    };
 
-                    if params.motion_type != MotionType::Homography {
-                        // Use warp_affine() for Translation, Euclidean and Affine
-                        imgproc::warp_affine(
-                            &img_f32,
-                            &mut warped_image,
-                            &warp_matrix,
-                            img_f32.size()?,
-                            imgproc::INTER_LINEAR,
-                            core::BORDER_CONSTANT,
-                            core::Scalar::default(),
-                        )?;
-                    } else {
-                        // Use warp_perspective() for Homography
-                        // image = cv2.warpPerspective(image, M, (h, w))
-                        imgproc::warp_perspective(
-                            &img_f32,
-                            &mut warped_image,
-                            &warp_matrix,
-                            img_f32.size()?,
-                            imgproc::INTER_LINEAR,
-                            core::BORDER_CONSTANT,
-                            core::Scalar::default(),
-                        )?;
+                    Ok::<Option<utils::UnsafeMatSyncWrapper>, StackerError>(result)
+                },
+            )
+            .try_reduce(
+                || None,
+                |acc1, acc2| match (acc1, acc2) {
+                    (Some(acc1), None) => Ok(Some(acc1)),
+                    (None, Some(acc2)) => Ok(Some(acc2)),
+                    (Some(acc1), Some(acc2)) => {
+                        // Combine the two accumulators
+                        let combined = utils::UnsafeMatSyncWrapper(
+                            (&acc1.0 + &acc2.0).into_result()?.to_mat()?,
+                        );
+                        Ok(Some(combined))
                     }
-                    if let Ok(mut stacked_img) = stacked_img.lock() {
-                        // For some reason a mutex guard won't allow (*a + &b)
-                        let taken_stacked_img = std::mem::take(&mut *stacked_img);
-                        *stacked_img = (taken_stacked_img + &warped_image)
-                            .into_result()?
-                            .to_mat()?;
-                        Ok(())
-                    } else {
-                        Err(StackerError::MutexError)
-                    }
-                }
-            })
-            .collect();
-        result?.len() + 1
+                    _ => unreachable!(),
+                },
+            )?
     };
-    if let Ok(stacked_img) = Arc::try_unwrap(stacked_img) {
-        if let Ok(mut stacked_img) = stacked_img.into_inner() {
-            stacked_img = (stacked_img / number_of_files as f64)
-                .into_result()?
-                .to_mat()?;
-            return Ok(stacked_img);
-        }
+    // Final normalization
+    let final_result = if let Some(result) = result {
+        (result.0 / files_vec.len() as f64)
+            .into_result()?
+            .to_mat()?
+    } else {
+        return Err(StackerError::ProcessingError(
+            "Empty result after reduction".to_string(),
+        ));
+    };
+
+    Ok(final_result)
+}
+
+pub fn ecc_match_no_scaling<I>(files: I, params: EccMatchParameters) -> Result<Mat, StackerError>
+where
+    I: IntoIterator<Item = PathBuf>,
+{
+    let files_vec: Vec<PathBuf> = files.into_iter().collect();
+
+    if files_vec.is_empty() {
+        return Err(StackerError::NotEnoughFiles);
     }
-    Err(StackerError::MutexError)
+
+    let criteria = Result::<core::TermCriteria, StackerError>::from(params)?;
+
+    let (first_img_grey_wr, first_img_f32_wr) = {
+        let (img_grey, first_img_f32) = utils::read_grey_f32(&files_vec[0])?;
+        (
+            utils::UnsafeMatSyncWrapper(img_grey),
+            utils::UnsafeMatSyncWrapper(first_img_f32),
+        )
+    };
+
+    // Combined map-reduce step: Process each image and reduce on the fly
+    let result = {
+        let first_img_f32_wrmv = &first_img_f32_wr;
+        let first_img_grey_wrmw = &first_img_grey_wr;
+        let files_vec_mv = &files_vec;
+
+        (0..files_vec.len())
+            .into_par_iter()
+            .try_fold(
+                || None, // Initial accumulator for each thread
+                move |acc: Option<utils::UnsafeMatSyncWrapper>, index| {
+                    let warped_image = if index == 0 {
+                        // For the first image, just use the already processed image
+                        first_img_f32_wrmv.0.clone()
+                    } else {
+                        let (img_grey, img_f32) = utils::read_grey_f32(&files_vec_mv[index])?;
+
+                        // s, M = cv2.findTransformECC(cv2.cvtColor(image,cv2.COLOR_BGR2GRAY), first_image, M, cv2.MOTION_HOMOGRAPHY)
+
+                        let mut warp_matrix = if params.motion_type != MotionType::Homography {
+                            Mat::eye(2, 3, opencv::core::CV_32F)?.to_mat()?
+                        } else {
+                            Mat::eye(3, 3, opencv::core::CV_32F)?.to_mat()?
+                        };
+
+                        let _ = opencv::video::find_transform_ecc(
+                            &img_grey,
+                            &first_img_grey_wrmw.0,
+                            &mut warp_matrix,
+                            params.motion_type as i32,
+                            criteria,
+                            &Mat::default(),
+                            params.gauss_filt_size,
+                        )?;
+                        let mut warped_image = Mat::default();
+
+                        if params.motion_type != MotionType::Homography {
+                            // Use warp_affine() for Translation, Euclidean and Affine
+                            imgproc::warp_affine(
+                                &img_f32,
+                                &mut warped_image,
+                                &warp_matrix,
+                                img_f32.size()?,
+                                imgproc::INTER_LINEAR,
+                                core::BORDER_CONSTANT,
+                                core::Scalar::default(),
+                            )?;
+                        } else {
+                            // Use warp_perspective() for Homography
+                            // image = cv2.warpPerspective(image, M, (h, w))
+                            imgproc::warp_perspective(
+                                &img_f32,
+                                &mut warped_image,
+                                &warp_matrix,
+                                img_f32.size()?,
+                                imgproc::INTER_LINEAR,
+                                core::BORDER_CONSTANT,
+                                core::Scalar::default(),
+                            )?;
+                        }
+                        warped_image
+                    };
+
+                    let result = if let Some(acc) = acc {
+                        let rv = utils::UnsafeMatSyncWrapper(
+                            (&acc.0 + &warped_image).into_result()?.to_mat()?,
+                        );
+                        Some(rv)
+                    } else {
+                        Some(utils::UnsafeMatSyncWrapper(warped_image))
+                    };
+
+                    Ok::<Option<utils::UnsafeMatSyncWrapper>, StackerError>(result)
+                },
+            )
+            .try_reduce(
+                || None,
+                |acc1, acc2| match (acc1, acc2) {
+                    (Some(acc1), None) => Ok(Some(acc1)),
+                    (None, Some(acc2)) => Ok(Some(acc2)),
+                    (Some(acc1), Some(acc2)) => {
+                        // Combine the two accumulators
+                        let combined = utils::UnsafeMatSyncWrapper(
+                            (&acc1.0 + &acc2.0).into_result()?.to_mat()?,
+                        );
+                        Ok(Some(combined))
+                    }
+                    _ => unreachable!(),
+                },
+            )?
+    };
+    // Final normalization
+    let final_result = if let Some(result) = result {
+        (result.0 / files_vec.len() as f64)
+            .into_result()?
+            .to_mat()?
+    } else {
+        return Err(StackerError::ProcessingError(
+            "Empty result after reduction".to_string(),
+        ));
+    };
+
+    Ok(final_result)
 }
 
 /// Detect sharpness of an image <https://stackoverflow.com/a/7768918>
@@ -428,10 +864,10 @@ pub fn sharpness_variance_of_laplacian(src_mat: &Mat) -> Result<f64, StackerErro
         src_mat,
         &mut lap,
         core::CV_64FC1,
-        1,
+        3,
         1.0,
         0.0,
-        core::BORDER_DEFAULT,
+        core::BORDER_REPLICATE,
     )?;
     let mut mu = Mat::default();
     let mut sigma = Mat::default();
@@ -449,8 +885,13 @@ pub fn sharpness_variance_of_laplacian(src_mat: &Mat) -> Result<f64, StackerErro
 ///
 /// # Returns
 /// Sharpness metric (higher values indicate sharper images)
-/// TODO: This function does not, yet, work as intended
 pub fn sharpness_tenengrad(src_grey_mat: &Mat, k_size: i32) -> Result<f64, StackerError> {
+    // Validate kernel size
+    if ![1, 3, 5, 7].contains(&k_size) {
+        return Err(StackerError::InvalidParams(
+            "Kernel size must be 1, 3, 5, or 7".into(),
+        ));
+    }
     // Compute gradients using Sobel
     let mut gx = Mat::default();
     let mut gy = Mat::default();
@@ -458,19 +899,19 @@ pub fn sharpness_tenengrad(src_grey_mat: &Mat, k_size: i32) -> Result<f64, Stack
         src_grey_mat,
         &mut gx,
         core::CV_64FC1,
-        1,  // x-order
-        0,  // y-order
+        1, // x-order
+        0, // y-order
         k_size,
-        1.0,  // scale
-        0.0,  // delta
+        1.0, // scale
+        0.0, // delta
         core::BORDER_DEFAULT,
     )?;
     imgproc::sobel(
         src_grey_mat,
         &mut gy,
         core::CV_64FC1,
-        0,  // x-order
-        1,  // y-order
+        0, // x-order
+        1, // y-order
         k_size,
         1.0,
         0.0,
@@ -495,48 +936,25 @@ pub fn sharpness_tenengrad(src_grey_mat: &Mat, k_size: i32) -> Result<f64, Stack
 /// Detect sharpness of an image <https://stackoverflow.com/a/7768918>
 /// OpenCV port of 'GLVN' algorithm (Santos97)
 pub fn sharpness_normalized_gray_level_variance(src_mat: &Mat) -> Result<f64, StackerError> {
+    // Convert to floating point representation
+    let mut src_float = Mat::default();
+    src_mat.convert_to(&mut src_float, core::CV_64FC1, 1.0, 0.0)?;
+
+    // Compute statistics
     let mut mu = Mat::default();
     let mut sigma = Mat::default();
-    opencv::core::mean_std_dev(&src_mat, &mut mu, &mut sigma, &Mat::default())?;
-    let focus_measure = *sigma.at_2d::<f64>(0, 0)?;
-    Ok(focus_measure * focus_measure / (*mu.at_2d::<f64>(0, 0)?))
+    core::mean_std_dev(&src_float, &mut mu, &mut sigma, &Mat::default())?;
+
+    // Numerical safety
+    let variance = sigma.at_2d::<f64>(0, 0)?.powi(2);
+    let mu_value = mu.at_2d::<f64>(0, 0)?.max(f64::EPSILON);
+
+    Ok(variance / mu_value)
 }
 
-/// Trait for setting value in a 2d Mat<T>
-/// Todo:There must be a better way to do this
-pub trait SetMValue {
-    fn set_2d<T: opencv::prelude::DataType>(
-        &mut self,
-        row: i32,
-        col: i32,
-        value: T,
-    ) -> Result<(), StackerError>;
-}
-
-impl SetMValue for Mat {
-    #[inline]
-    /// ```
-    /// # use libstacker::{prelude::*, opencv::prelude::* ,opencv::prelude::MatTraitConst};
-    /// let mut m = unsafe { opencv::core::Mat::new_rows_cols(1, 3, opencv::core::CV_64FC1).unwrap() };
-    /// m.set_2d::<f64>(0, 0, -1.0).unwrap();
-    /// m.set_2d::<f64>(0, 1, -2.0).unwrap();
-    /// m.set_2d::<f64>(0, 2, -3.0).unwrap();
-    /// assert_eq!(-1.0, *m.at_2d::<f64>(0,0).unwrap());
-    /// assert_eq!(-2.0, *m.at_2d::<f64>(0,1).unwrap());
-    /// assert_eq!(-3.0, *m.at_2d::<f64>(0,2).unwrap());
-    /// ```
-    fn set_2d<T: opencv::prelude::DataType>(
-        &mut self,
-        row: i32,
-        col: i32,
-        value: T,
-    ) -> Result<(), StackerError> {
-        let v = self.at_2d_mut::<T>(row, col)?;
-        *v = value;
-        Ok(())
-    }
-}
-
-pub mod prelude{
-    pub use super::{keypoint_match, ecc_match, EccMatchParameters, StackerError, MotionType, KeyPointMatchParameters, SetMValue};
+pub mod prelude {
+    pub use super::{
+        EccMatchParameters, KeyPointMatchParameters, MotionType, StackerError, ecc_match,
+        keypoint_match,
+    };
 }

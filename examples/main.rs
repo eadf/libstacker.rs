@@ -16,10 +16,7 @@ pub fn collect_image_files(
         .filter(|p| p.extension().is_some() && p.extension().unwrap().to_str().is_some())
         .filter(|p| {
             let extension = p.extension().unwrap().to_str().unwrap().to_uppercase();
-            extension == "JPG"
-                || extension == "JPEG"
-                || extension == "TIF"
-                || extension == "PNG"
+            extension == "JPG" || extension == "JPEG" || extension == "TIF" || extension == "PNG"
         })
         .collect())
 }
@@ -45,8 +42,8 @@ fn main() -> Result<(), StackerError> {
                 f,
                 libstacker::sharpness_modified_laplacian(&img_gray)?, // LAPM = 1
                 libstacker::sharpness_variance_of_laplacian(&img_gray)?, // LAPV = 2
-                libstacker::sharpness_tenengrad(&img_gray, 3)?, // TENG = 3
-                libstacker::sharpness_normalized_gray_level_variance(&img_gray)?,// GLVN = 4
+                libstacker::sharpness_tenengrad(&img_gray, 3)?,       // TENG = 3
+                libstacker::sharpness_normalized_gray_level_variance(&img_gray)?, // GLVN = 4
             ))
         })
         .collect::<Result<Vec<_>, StackerError>>()?;
@@ -65,7 +62,6 @@ fn main() -> Result<(), StackerError> {
     // only keep the filename and skip the first file (the bad one) and reverse the order
     // keeping the best image first.
     let files: Vec<_> = files.into_iter().map(|f| f.0).skip(1).rev().collect();
-    //println!("Using these files {:?}", files);
 
     let now = std::time::Instant::now();
     let keypoint_match_img = keypoint_match(
@@ -74,11 +70,37 @@ fn main() -> Result<(), StackerError> {
             method: opencv::calib3d::RANSAC,
             ransac_reproj_threshold: 5.0,
         },
+        None,
+        //Some(720.0),
     )?;
     println!("Calculated keypoint_match() in {:?}", now.elapsed());
 
     let now = std::time::Instant::now();
+    let keypoint_match_img_400 = keypoint_match(
+        &files,
+        libstacker::KeyPointMatchParameters {
+            method: opencv::calib3d::RANSAC,
+            ransac_reproj_threshold: 5.0,
+        },
+        Some(400.0),
+    )?;
+    println!("Calculated keypoint_match(size=400) in {:?}", now.elapsed());
+
+    let now = std::time::Instant::now();
     let ecc_match_img = libstacker::ecc_match(
+        &files,
+        libstacker::EccMatchParameters {
+            motion_type: libstacker::MotionType::Homography,
+            max_count: Some(5000),
+            epsilon: Some(1e-5),
+            gauss_filt_size: 5,
+        },
+        None,
+    )?;
+    println!("Calculated ecc_match() in {:?}", now.elapsed());
+
+    let now = std::time::Instant::now();
+    let ecc_match_img_400 = libstacker::ecc_match(
         files,
         libstacker::EccMatchParameters {
             motion_type: libstacker::MotionType::Homography,
@@ -86,12 +108,15 @@ fn main() -> Result<(), StackerError> {
             epsilon: Some(1e-5),
             gauss_filt_size: 5,
         },
+        Some(400.0),
     )?;
-    println!("Calculated ecc_match() in {:?}", now.elapsed());
+    println!("Calculated ecc_match(size=400) in {:?}", now.elapsed());
 
     while highgui::wait_key(33)? != 27 {
         highgui::imshow("KeyPoint match", &keypoint_match_img)?;
         highgui::imshow("ECC match", &ecc_match_img)?;
+        highgui::imshow("KeyPoint match size 400", &keypoint_match_img_400)?;
+        highgui::imshow("ECC match size 400", &ecc_match_img_400)?;
     }
     Ok(())
 }

@@ -50,7 +50,7 @@ The result should be two windows showing the stacked images using two different 
 ## API
 ```rust
 let keypoint_match_img:opencv::core::Mat = keypoint_match(
-   // any IntoIter containing paths to image files
+   // any IntoIter containing image file names (of any path-like type)
    vec!["1.jpg","2.jpg","3.jpg","4.jpg","5.jpg"],
    KeyPointMatchParameters {
       method: opencv::calib3d::RANSAC,
@@ -62,7 +62,7 @@ let keypoint_match_img:opencv::core::Mat = keypoint_match(
 Depending on the parameters the `ecc_match()` is much slower, but also more accurate. 
 ```rust
 let ecc_match_img:opencv::core::Mat = ecc_match(
-   // any IntoIter containing paths to image files
+   // any IntoIter containing image file names (of any path-like type)
    vec!["1.jpg","2.jpg","3.jpg","4.jpg","5.jpg"],
    EccMatchParameters {
       motion_type: MotionType::Homography,

@@ -18,6 +18,11 @@ opencv = { version = "0.94.3" , features = ["features2d"] }
 thiserror = "2.0.12"
 ordered-float = "5.0.0"
 rayon = "1.10.0"
+backtrace = { version="0.3.74", optional = false }
 
 [features]
 clang-runtime = ["opencv/clang-runtime"]
+#backtrace = ["dep:backtrace"]
+
+[profile.dev]
+debug = 2  # Full debug info

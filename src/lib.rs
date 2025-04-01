@@ -16,7 +16,6 @@
 
 pub mod utils;
 
-use backtrace::Backtrace as Backtrace2;
 pub use opencv;
 use opencv::core::{Point2f, Vector};
 use opencv::{calib3d, core, features2d, imgcodecs, imgproc, prelude::*};
@@ -28,20 +27,14 @@ use utils::{MatExt, SetMValue};
 
 #[derive(Error, Debug)]
 pub enum StackerError {
-    //#[error(transparent)]
-    //CvError(#[from] opencv::Error),
-    #[error("OpenCV error: {source}")]
-    OpenCvError {
-        source: opencv::Error,
-        backtrace2: Backtrace2,
-    },
+    #[error(transparent)]
+    OpenCvError(#[from] opencv::Error),
     #[error("Something wrong with Arc/Mutex handling")]
     MutexError,
     #[error("Not enough files")]
     NotEnoughFiles,
     #[error("Not implemented")]
     NotImplemented,
-
     #[error(transparent)]
     IoError(#[from] std::io::Error),
     #[error(transparent)]
@@ -97,16 +90,6 @@ where
     } else {
         keypoint_match_no_scale(files, params)
     }
-    .map_err(|e| match e {
-        StackerError::OpenCvError {
-            source: _,
-            backtrace2: ref b,
-        } => {
-            println!("{:?}", b.clone());
-            e
-        }
-        _ => e,
-    })
 }
 
 fn keypoint_match_no_scale<I>(
@@ -295,7 +278,14 @@ where
         utils::UnsafeMatSyncWrapper(first_img.convert(opencv::core::CV_32F, 1.0 / 255.0, 0.0)?);
 
     // Get the image size from the first image for later use
-    let img_size = first_img.size()?;
+    let full_size = first_img.size()?;
+
+    if scale_down_to >= full_size.width as f32 {
+        return Err(StackerError::InvalidParams(format!(
+            "scale_down_to was larger (or equal) to the full image width: full_size:{}, scale_down_to:{}",
+            full_size.width, scale_down_to
+        )));
+    }
 
     // Number of files for final normalization
     let number_of_files = files_vec.len();
@@ -407,7 +397,7 @@ where
                             &img_original,
                             &mut warped_image,
                             &h,
-                            img_size,
+                            full_size,
                             imgproc::INTER_LINEAR,
                             core::BORDER_CONSTANT,
                             core::Scalar::default(),
@@ -514,16 +504,6 @@ where
     } else {
         ecc_match_no_scaling(files, params)
     }
-    .map_err(|e| match e {
-        StackerError::OpenCvError {
-            source: _,
-            backtrace2: ref b,
-        } => {
-            println!("{:?}", b.clone());
-            e
-        }
-        _ => e,
-    })
 }
 
 pub fn ecc_match_scaling_down<I>(
@@ -552,6 +532,12 @@ where
 
     // Load first image in color and grayscale
     let full_size = first_img_f32_wr.0.size()?;
+    if scale_down_to >= full_size.width as f32 {
+        return Err(StackerError::InvalidParams(format!(
+            "scale_down_to was larger (or equal) to the full image width: full_size:{}, scale_down_to:{}",
+            full_size.width, scale_down_to
+        )));
+    }
 
     // Scale down the first image for ECC
     let first_img_grey_small_wr =

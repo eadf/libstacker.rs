@@ -1,5 +1,4 @@
 use super::{EccMatchParameters, StackerError};
-use backtrace::Backtrace as Backtrace2;
 use opencv::core::{AlgorithmHint, Mat, MatTrait, MatTraitConst};
 use opencv::features2d::ORB;
 use opencv::prelude::Feature2DTrait;
@@ -71,26 +70,14 @@ impl SetMValue for Mat {
     }
 }
 
-// Implement From<opencv::Error> for automatic conversion
-impl From<opencv::Error> for StackerError {
-    fn from(source: opencv::Error) -> Self {
-        Self::OpenCvError {
-            source,
-            backtrace2: Backtrace2::new(), // Captures when conversion happens
-        }
-    }
-}
-
 /// Safe wrapper around OpenCV's `imread` with proper error handling
 ///
 /// This exists because:
 /// 1. OpenCV's API requires a `&str` path rather than standard Rust `Path` types
 /// 2. Paths might contain non-Unicode characters that need proper error handling
-/// 3. OpenCV errors lack context about which file caused the failure
 ///
 /// # Features
 /// - Converts `Path`-like inputs to strings with validation
-/// - Annotates OpenCV errors with the original file path
 /// - Returns domain-specific errors (`StackerError`) instead of raw OpenCV errors
 ///
 /// # Arguments

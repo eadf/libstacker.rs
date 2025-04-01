@@ -84,7 +84,7 @@ fn main() -> Result<(), StackerError> {
         },
         Some(400.0),
     )?;
-    println!("Calculated keypoint_match(size=400) in {:?}", now.elapsed());
+    println!("Calculated keypoint_match(width=400) in {:?}", now.elapsed());
 
     let now = std::time::Instant::now();
     let ecc_match_img = libstacker::ecc_match(
@@ -110,13 +110,13 @@ fn main() -> Result<(), StackerError> {
         },
         Some(400.0),
     )?;
-    println!("Calculated ecc_match(size=400) in {:?}", now.elapsed());
+    println!("Calculated ecc_match(width=400) in {:?}", now.elapsed());
 
     while highgui::wait_key(33)? != 27 {
         highgui::imshow("KeyPoint match", &keypoint_match_img)?;
         highgui::imshow("ECC match", &ecc_match_img)?;
-        highgui::imshow("KeyPoint match size 400", &keypoint_match_img_400)?;
-        highgui::imshow("ECC match size 400", &ecc_match_img_400)?;
+        highgui::imshow("KeyPoint match width 400", &keypoint_match_img_400)?;
+        highgui::imshow("ECC match width 400", &ecc_match_img_400)?;
     }
     Ok(())
 }

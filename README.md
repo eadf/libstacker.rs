@@ -1,7 +1,7 @@
 [![crates.io](https://img.shields.io/crates/v/libstacker.svg)](https://crates.io/crates/libstacker)
 [![Documentation](https://docs.rs/libstacker/badge.svg)](https://docs.rs/libstacker)
-[![Workflow](https://github.com/eadf/libstacker.rs/workflows/Rust/badge.svg)](https://github.com/eadf/libstacker.rs/workflows/Rust/badge.svg)
-[![dependency status](https://deps.rs/crate/libstacker/0.0.7/status.svg)](https://deps.rs/crate/libstacker/0.0.7)
+[![Rust test](https://github.com/eadf/libstacker.rs/actions/workflows/rust.yml/badge.svg?branch=main)](https://github.com/eadf/libstacker.rs/actions/workflows/rust.yml)
+[![dependency status](https://deps.rs/crate/libstacker/0.0.8/status.svg)](https://deps.rs/crate/libstacker/0.0.8)
 ![license](https://img.shields.io/crates/l/libstacker)
 
 # libstacker
@@ -56,6 +56,7 @@ let keypoint_match_img:opencv::core::Mat = keypoint_match(
       method: opencv::calib3d::RANSAC,
       ransac_reproj_threshold: 5.0,
    },
+   None,
 )?;
 ```
 
@@ -70,6 +71,7 @@ let ecc_match_img:opencv::core::Mat = ecc_match(
       epsilon: Some(1e-5),
       gauss_filt_size: 5,
    },
+   None,
 )?;
 ```
 

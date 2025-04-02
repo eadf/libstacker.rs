@@ -69,11 +69,18 @@ fn main() -> Result<(), StackerError> {
         libstacker::KeyPointMatchParameters {
             method: opencv::calib3d::RANSAC,
             ransac_reproj_threshold: 5.0,
+            match_ratio: 0.9,
+            match_keep_ratio: 0.80,
+            border_mode: opencv::core::BORDER_CONSTANT,
+            border_value: opencv::core::Scalar::default(),
         },
         None,
-        //Some(720.0),
     )?;
-    println!("Calculated keypoint_match() in {:?}", now.elapsed());
+    let keypoint_match_img_duration = now.elapsed();
+    println!(
+        "Calculated keypoint_match() in {:?} dropped frames:{}",
+        keypoint_match_img_duration, keypoint_match_img.0
+    );
 
     let now = std::time::Instant::now();
     let keypoint_match_img_400 = keypoint_match(
@@ -81,10 +88,18 @@ fn main() -> Result<(), StackerError> {
         libstacker::KeyPointMatchParameters {
             method: opencv::calib3d::RANSAC,
             ransac_reproj_threshold: 5.0,
+            match_ratio: 0.9,
+            match_keep_ratio: 0.80,
+            border_mode: opencv::core::BORDER_CONSTANT,
+            border_value: opencv::core::Scalar::default(),
         },
         Some(400.0),
     )?;
-    println!("Calculated keypoint_match(width=400) in {:?}", now.elapsed());
+    let keypoint_match_400_img_duration = now.elapsed();
+    println!(
+        "Calculated keypoint_match(width=400) in {:?} dropped frames:{}",
+        keypoint_match_400_img_duration, keypoint_match_img_400.0
+    );
 
     let now = std::time::Instant::now();
     let ecc_match_img = libstacker::ecc_match(
@@ -97,7 +112,8 @@ fn main() -> Result<(), StackerError> {
         },
         None,
     )?;
-    println!("Calculated ecc_match() in {:?}", now.elapsed());
+    let ecc_match_img_duration = now.elapsed();
+    println!("Calculated ecc_match() in {:?}", ecc_match_img_duration);
 
     let now = std::time::Instant::now();
     let ecc_match_img_400 = libstacker::ecc_match(
@@ -110,13 +126,37 @@ fn main() -> Result<(), StackerError> {
         },
         Some(400.0),
     )?;
-    println!("Calculated ecc_match(width=400) in {:?}", now.elapsed());
+    let ecc_match_400_img_duration = now.elapsed();
+    println!(
+        "Calculated ecc_match(width=400) in {:?}",
+        ecc_match_400_img_duration
+    );
 
     while highgui::wait_key(33)? != 27 {
-        highgui::imshow("KeyPoint match", &keypoint_match_img)?;
-        highgui::imshow("ECC match", &ecc_match_img)?;
-        highgui::imshow("KeyPoint match width 400", &keypoint_match_img_400)?;
-        highgui::imshow("ECC match width 400", &ecc_match_img_400)?;
+        highgui::imshow(
+            format!(
+                "KeyPoint match (full resolution) [{:?}]",
+                keypoint_match_img_duration
+            )
+            .as_str(),
+            &keypoint_match_img.1,
+        )?;
+        highgui::imshow(
+            format!("ECC match (full resolution) [{:?}]", ecc_match_img_duration).as_str(),
+            &ecc_match_img,
+        )?;
+        highgui::imshow(
+            format!(
+                "KeyPoint match (width 400) [{:?}]",
+                keypoint_match_400_img_duration
+            )
+            .as_str(),
+            &keypoint_match_img_400.1,
+        )?;
+        highgui::imshow(
+            format!("ECC match (width 400) [{:?}]", ecc_match_400_img_duration).as_str(),
+            &ecc_match_img_400,
+        )?;
     }
     Ok(())
 }

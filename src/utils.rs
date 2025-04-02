@@ -108,17 +108,28 @@ impl SetMValue for Mat {
 /// # Ok(()) }
 /// ```
 #[inline(always)]
-pub fn imread<P: AsRef<std::path::Path>>(path: P, flags: i32) -> Result<Mat, StackerError> {
+pub fn imread<P: AsRef<std::path::Path>>(path: P, imread_flags: i32) -> Result<Mat, StackerError> {
     let path_str = path
         .as_ref()
         .to_str()
         .ok_or_else(|| StackerError::InvalidPathEncoding(path.as_ref().to_path_buf()))?;
-    Ok(imgcodecs::imread(path_str, flags)?)
+    Ok(imgcodecs::imread(path_str, imread_flags)?)
 }
 
+/*
+#[inline]
+fn imread_32f<P: AsRef<std::path::Path>>(path: P, imread_flags: i32) -> Result<Mat, StackerError> {
+    let img = imread(path, imread_flags)?;
+    img.convert(opencv::core::CV_32F, 1.0/255.0, 0.0)
+}
+*/
+
 /// Read a image file and returns a (`Mat<COLOR_BGR2GRAY>`,`Mat<CV_32F>`) tuple
-pub(super) fn read_grey_f32(filename: &path::Path) -> Result<(Mat, Mat), StackerError> {
-    let img = imgcodecs::imread(filename.to_str().unwrap(), imgcodecs::IMREAD_COLOR)?;
+pub(super) fn read_grey_and_f32(
+    filename: &path::Path,
+    imread_flags: i32,
+) -> Result<(Mat, Mat), StackerError> {
+    let img = imgcodecs::imread(filename.to_str().unwrap(), imread_flags)?;
     let img_f32 = img.convert(opencv::core::CV_32F, 1.0 / 255.0, 0.0)?;
 
     let mut img_grey = Mat::default();
@@ -235,3 +246,16 @@ macro_rules! impl_adjust_homography_for_scale {
 // Implement for both f32 and f64
 impl_adjust_homography_for_scale!(adjust_homography_for_scale_f64, f64);
 impl_adjust_homography_for_scale!(adjust_homography_for_scale_f32, f32);
+
+impl Default for crate::KeyPointMatchParameters {
+    fn default() -> Self {
+        Self {
+            method: opencv::calib3d::RANSAC,
+            ransac_reproj_threshold: 3.0,
+            match_keep_ratio: 0.75,
+            match_ratio: 0.8,
+            border_mode: opencv::core::BORDER_CONSTANT,
+            border_value: opencv::core::Scalar::default(),
+        }
+    }
+}

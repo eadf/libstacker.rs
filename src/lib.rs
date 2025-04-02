@@ -716,7 +716,7 @@ where
     }
 }
 
-pub fn ecc_match_no_scaling<I>(files: I, params: EccMatchParameters) -> Result<Mat, StackerError>
+fn ecc_match_no_scaling<I>(files: I, params: EccMatchParameters) -> Result<Mat, StackerError>
 where
     I: IntoIterator<Item = PathBuf>,
 {
@@ -846,7 +846,7 @@ where
     Ok(final_result)
 }
 
-pub fn ecc_match_scaling_down<I>(
+fn ecc_match_scaling_down<I>(
     files: I,
     params: EccMatchParameters,
     scale_down_width: f32,

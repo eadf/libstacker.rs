@@ -1,0 +1,4 @@
+[alias]
+test-all = "test --all --features=clang-runtime"
+clippy-all = "clippy --all --all-targets --features=clang-runtime"
+fmt-all = "fmt --all"

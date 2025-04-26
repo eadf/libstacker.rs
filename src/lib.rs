@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT OR Apache-2.0
 // Copyright (c) 2021,2025 lacklustr@protonmail.com https://github.com/eadf
 
-//! This library contains multi-threaded image stacking functions,
+//! This library contains multithreaded image stacking functions,
 //! based on OpenCV <https://crates.io/crates/opencv> and Rayon <https://crates.io/crates/rayon>.
 //!
 //! Copyright (c) 2021, 2025 Eadf <lacklustr@protonmail.com>.

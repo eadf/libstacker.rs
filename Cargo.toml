@@ -8,6 +8,7 @@ readme = "README.md"
 keywords = ["opencv", "image_stacking"]
 repository = "https://github.com/eadf/libstacker.rs"
 description = "Image alignment and stacking functions based on OpenCV and Rayon"
+rust-version = "1.85.1"
 
 [[example]]
 name = "main"
@@ -20,6 +21,7 @@ ordered-float = "5.0.0"
 rayon = "1.10.0"
 
 [features]
+default = ["clang-runtime"]
 clang-runtime = ["opencv/clang-runtime"]
 
 [profile.dev]

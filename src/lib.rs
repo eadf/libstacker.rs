@@ -7,7 +7,7 @@
 //! Copyright (c) 2021, 2025 Eadf <lacklustr@protonmail.com>.
 //! License: MIT/Apache 2.0
 //!
-//! The is a port of code written by Mathias Sundholm.
+//! This is a port of code written by Mathias Sundholm.
 //! Copyright (c) 2021 <https://github.com/maitek/image_stacking>
 //! License: MIT
 //!
@@ -19,7 +19,6 @@ pub mod utils;
 pub use opencv;
 use opencv::core::{Point2f, Vector};
 use opencv::{calib3d, core, features2d, imgcodecs, imgproc, prelude::*};
-use ordered_float::OrderedFloat;
 use rayon::prelude::*;
 use std::path::PathBuf;
 use thiserror::Error;
@@ -231,8 +230,7 @@ where
                                 .collect::<Vec<_>>();
 
                             // Sort by distance
-                            filtered_matches.sort_by(|a, b| OrderedFloat(a.distance).cmp(&OrderedFloat(b.distance)));
-
+                            filtered_matches.sort_by(|a, b| a.distance.partial_cmp(&b.distance).unwrap_or(std::cmp::Ordering::Equal));
                             // Keep only the best 50% of matches (optional)
                             let num_to_keep = (filtered_matches.len() as f32 * params.match_keep_ratio).round() as usize;
                             filtered_matches.truncate(num_to_keep);
@@ -464,7 +462,9 @@ where
 
                             // Sort by distance
                             filtered_matches.sort_by(|a, b| {
-                                OrderedFloat(a.distance).cmp(&OrderedFloat(b.distance))
+                                a.distance
+                                    .partial_cmp(&b.distance)
+                                    .unwrap_or(std::cmp::Ordering::Equal)
                             });
 
                             // Keep only the best 50% of matches (optional)

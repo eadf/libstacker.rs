@@ -50,7 +50,7 @@ fn main() -> Result<(), StackerError> {
     println!("Calculated sharpness() in {:?}", now.elapsed());
 
     // sort images by sharpness using TENG for now
-    files.sort_by_key(|f| ordered_float::OrderedFloat(f.3));
+    files.sort_by(|a, b| a.3.partial_cmp(&b.3).unwrap_or(std::cmp::Ordering::Equal));
 
     println!("Files ordered by TENG (low quality first)");
     for f in files.iter() {

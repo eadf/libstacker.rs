@@ -43,7 +43,7 @@ jobs:
       - name: Clone OpenCV repositories
         run: |
           set -e  # Exit immediately on error
-          OPENCV_VERSION=4.11.0
+          OPENCV_VERSION=4.12.0
           git clone --depth 1 --branch $OPENCV_VERSION https://github.com/opencv/opencv.git
           git clone --depth 1 --branch $OPENCV_VERSION https://github.com/opencv/opencv_contrib.git
           mkdir -p opencv/build
@@ -61,7 +61,7 @@ jobs:
           path: |
             opencv/build
             ${{ github.workspace }}/opencv_install
-          key: opencv-${{ runner.os }}-${{ hashFiles('opencv/CMakeLists.txt') }}-4.11.0
+          key: opencv-${{ runner.os }}-${{ hashFiles('opencv/CMakeLists.txt') }}-4.12.0
 
       # Build OpenCV if cache miss
       - name: Build OpenCV from source
@@ -89,6 +89,12 @@ jobs:
           echo "OPENCV_LINK_PATHS=${{ github.workspace }}/opencv_install/lib" >> $GITHUB_ENV
           # Add LD_LIBRARY_PATH for runtime linking
           echo "LD_LIBRARY_PATH=${{ github.workspace }}/opencv_install/lib:$LD_LIBRARY_PATH" >> $GITHUB_ENV
+
+      - name: Install cargo-deny
+        run: cargo install cargo-deny
+
+      - name: Run cargo-deny
+        run: cargo deny check
 
       - name: Clippy
         run: cargo clippy  --all --all-targets --features "clang-runtime"

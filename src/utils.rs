@@ -34,7 +34,7 @@ unsafe impl Sync for UnsafeVectorKeyPointSyncWrapper {}
 pub(super) struct UnsafeMatSyncWrapper(pub(super) Mat);
 unsafe impl Sync for UnsafeMatSyncWrapper {}
 
-/// Trait for setting value in a 2d Mat<T>
+/// Trait for setting value in a 2d `Mat<T>`
 /// Todo:There must be a better way to do this
 pub trait SetMValue {
     fn set_2d<T: opencv::prelude::DataType>(

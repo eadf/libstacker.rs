@@ -2,23 +2,23 @@
 authors = ["eadf <lacklustr@protonmail.com>"]
 name = "libstacker"
 license = "MIT OR Apache-2.0"
-version = "0.0.8"
+version = "0.0.9"
 edition = "2024"
 readme = "README.md"
 keywords = ["opencv", "image_stacking"]
 repository = "https://github.com/eadf/libstacker.rs"
 description = "Image alignment and stacking functions based on OpenCV and Rayon"
-rust-version = "1.85.1"
+rust-version = "1.87.0"
 
 [[example]]
 name = "main"
 path = "examples/main.rs"
+doc = false
 
 [dependencies]
-opencv = { version = "0.94.3" , features = ["features2d"] }
-thiserror = "2.0.12"
-ordered-float = "5.0.0"
-rayon = "1.10.0"
+opencv = { version = "0.97.2", features = ["features2d"] }
+thiserror = "2.0.17"
+rayon = "1.11.0"
 
 [features]
 default = ["clang-runtime"]

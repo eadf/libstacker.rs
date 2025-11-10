@@ -2,7 +2,8 @@
 [![Documentation](https://docs.rs/libstacker/badge.svg)](https://docs.rs/libstacker)
 [![Rust test](https://github.com/eadf/libstacker.rs/actions/workflows/rust.yml/badge.svg?branch=main)](https://github.com/eadf/libstacker.rs/actions/workflows/rust.yml)
 [![dependency status](https://deps.rs/crate/libstacker/0.0.8/status.svg)](https://deps.rs/crate/libstacker/0.0.8)
-![license](https://img.shields.io/crates/l/libstacker)
+[![license](https://img.shields.io/crates/l/libstacker?maxAge=2592000)](https://github.com/eadf/libstacker.rs#license)
+[![Sponsor](https://img.shields.io/static/v1?label=Sponsor&message=%E2%9D%A4&logo=GitHub&color=%23fe8e86)](https://github.com/sponsors/eadf)
 
 # libstacker
 A multithreaded port of the python code found [here: github.com/maitek/image_stacking](https://github.com/maitek/image_stacking) 
@@ -20,7 +21,7 @@ Read more about image alignment with OpenCV [here](https://learnopencv.com/image
 Opencv-rust can be little tricky to install. Follow the instructions from [rust opencv](https://crates.io/crates/opencv)
 
 You will need the "clang-runtime" feature if you <a href="https://github.com/twistedfall/opencv-rust#Troubleshooting">experience problems with your clang environment</a>
-Disclaimer: the library is only built and tested against opencv 4.11.0.
+Disclaimer: the library is only built and tested against opencv 4.12.0.
 
 ```bash
 cargo build --release
@@ -91,3 +92,9 @@ Licensed under either of
 * MIT license ([LICENSE-MIT](LICENSE-MIT) or <http://opensource.org/licenses/MIT)>
 
 at your option.
+
+## Contribution
+
+Unless explicitly stated otherwise, any contribution intentionally submitted  
+for inclusion in the project by you, as defined in the Apache-2.0 license,  
+shall be dual-licensed as above, without any additional terms or conditions.

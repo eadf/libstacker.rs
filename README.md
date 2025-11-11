@@ -1,7 +1,7 @@
 [![crates.io](https://img.shields.io/crates/v/libstacker.svg)](https://crates.io/crates/libstacker)
 [![Documentation](https://docs.rs/libstacker/badge.svg)](https://docs.rs/libstacker)
 [![Rust test](https://github.com/eadf/libstacker.rs/actions/workflows/rust.yml/badge.svg?branch=main)](https://github.com/eadf/libstacker.rs/actions/workflows/rust.yml)
-[![dependency status](https://deps.rs/crate/libstacker/0.0.8/status.svg)](https://deps.rs/crate/libstacker/0.0.8)
+[![dependency status](https://deps.rs/crate/libstacker/0.1.0/status.svg)](https://deps.rs/crate/libstacker/0.1.0)
 [![license](https://img.shields.io/crates/l/libstacker?maxAge=2592000)](https://github.com/eadf/libstacker.rs#license)
 [![Sponsor](https://img.shields.io/static/v1?label=Sponsor&message=%E2%9D%A4&logo=GitHub&color=%23fe8e86)](https://github.com/sponsors/eadf)
 
